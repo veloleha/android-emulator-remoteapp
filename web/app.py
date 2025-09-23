@@ -391,16 +391,21 @@ def parse_full_setup_output(output):
 @app.route('/')
 def serve_main_interface():
     """Обслуживание главной страницы"""
-    return send_file('simple_interface.html')
+    # Получаем абсолютный путь к файлу в текущей директории
+    html_file = os.path.join(os.path.dirname(__file__), 'simple_interface.html')
+    return send_file(html_file)
 
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     """Обслуживание статических файлов"""
     try:
-        return send_file(filename)
+        # Получаем абсолютный путь к файлу
+        file_path = os.path.join(os.path.dirname(__file__), filename)
+        return send_file(file_path)
     except:
         # Если файл не найден, возвращаем главную страницу
-        return send_file('simple_interface.html')
+        html_file = os.path.join(os.path.dirname(__file__), 'simple_interface.html')
+        return send_file(html_file)
 
 if __name__ == '__main__':
     write_log("Запуск Flask API для Android Emulator Manager")
