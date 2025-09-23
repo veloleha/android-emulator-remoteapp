@@ -1,165 +1,165 @@
-# Android Emulator RemoteApp Automation
+# Автоматизация Android Emulator RemoteApp
 
-Automated solution for creating and managing Android emulator RemoteApp sessions on Windows Server with microphone support.
+Автоматизированное решение для создания и управления сессиями Android эмулятора через RemoteApp на Windows Server с поддержкой микрофона.
 
-## 🎯 Features
+## 🎯 Возможности
 
-- **Automated User Creation**: Sequential user creation (User1, User2, User3...)
-- **Android Virtual Device (AVD) Setup**: Optimized emulator configuration
-- **RemoteApp Integration**: Seamless RDP access to Android emulators
-- **Microphone Support**: Fixed 3-second cutoff issue in RemoteApp sessions
-- **Web Interface**: Flask-based management interface
-- **Step-by-Step Testing**: Individual component testing and validation
+- **Автоматическое создание пользователей**: Последовательное создание (User1, User2, User3...)
+- **Настройка Android Virtual Device (AVD)**: Оптимизированная конфигурация эмулятора
+- **Интеграция с RemoteApp**: Бесшовный RDP доступ к Android эмуляторам
+- **Поддержка микрофона**: Исправлена проблема 3-секундного отключения в RemoteApp сессиях
+- **Веб-интерфейс**: Интерфейс управления на базе Flask
+- **Пошаговое тестирование**: Индивидуальное тестирование и валидация компонентов
 
-## 🛠️ System Requirements
+## 🛠️ Системные требования
 
-- **OS**: Windows 10 LTSC (version 1809 or later) / Windows Server
-- **Android SDK**: Installed at `C:\Program Files\Android`
-- **Bat To Exe Converter**: For batch file conversion
-- **RDP Wrapper**: For multi-session RDP support
-- **Python 3.7+**: For Flask web interface
-- **PowerShell 5.1+**: For automation scripts
+- **ОС**: Windows 10 LTSC (версия 1809 или новее) / Windows Server
+- **Android SDK**: Установлен в `C:\Program Files\Android`
+- **Bat To Exe Converter**: Для конвертации batch файлов
+- **RDP Wrapper**: Для поддержки мульти-сессий RDP
+- **Python 3.7+**: Для Flask веб-интерфейса
+- **PowerShell 5.1+**: Для скриптов автоматизации
 
-## 📁 Project Structure
+## 📁 Структура проекта
 
 ```
 android-emulator-remoteapp/
 ├── scripts/
-│   ├── AndroidEmulatorSetup.ps1      # Main automation script
-│   ├── ConfigureGroupPolicy.ps1      # Microphone fix configuration
-│   └── Install-EmulatorSystem.ps1    # System installation script
+│   ├── AndroidEmulatorSetup.ps1      # Основной скрипт автоматизации
+│   ├── ConfigureGroupPolicy.ps1      # Настройка исправления микрофона
+│   └── Install-EmulatorSystem.ps1    # Скрипт установки системы
 ├── web/
-│   ├── app.py                        # Flask web application
-│   ├── step_scripts.py               # Step-wise testing scripts
-│   ├── simple_interface.html         # Web interface
-│   └── requirements.txt              # Python dependencies
+│   ├── app.py                        # Flask веб-приложение
+│   ├── step_scripts.py               # Скрипты пошагового тестирования
+│   ├── simple_interface.html         # Веб-интерфейс
+│   └── requirements.txt              # Python зависимости
 ├── docs/
-│   ├── SETUP.md                      # Setup instructions (Russian)
-│   ├── TESTING.md                    # Testing guide (Russian)
-│   └── TROUBLESHOOTING.md            # Troubleshooting guide
-└── README.md                         # This file
+│   ├── SETUP.md                      # Инструкции по установке (русский)
+│   ├── TESTING.md                    # Руководство по тестированию (русский)
+│   └── TROUBLESHOOTING.md            # Руководство по устранению неполадок
+└── README.md                         # Этот файл
 ```
 
-## 🚀 Quick Start
+## 🚀 Быстрый старт
 
-### 1. Clone Repository
+### 1. Клонирование репозитория
 ```bash
-git clone https://github.com/YOUR_USERNAME/android-emulator-remoteapp.git
+git clone https://github.com/veloleha/android-emulator-remoteapp.git
 cd android-emulator-remoteapp
 ```
 
-### 2. Install Dependencies
+### 2. Установка зависимостей
 ```bash
-# Install Python dependencies
+# Установка Python зависимостей
 pip install -r web/requirements.txt
 
-# Install Android SDK (if not already installed)
-# Download from: https://developer.android.com/studio
+# Установка Android SDK (если еще не установлен)
+# Скачать с: https://developer.android.com/studio
 ```
 
-### 3. Run System Installation
+### 3. Запуск установки системы
 ```powershell
-# Run as Administrator
+# Запустить от имени администратора
 .\scripts\Install-EmulatorSystem.ps1
 ```
 
-### 4. Start Web Interface
+### 4. Запуск веб-интерфейса
 ```bash
 cd web
 python app.py
 ```
 
-### 5. Access Web Interface
-Open http://localhost:5000 in your browser
+### 5. Доступ к веб-интерфейсу
+Откройте http://localhost:5000 в браузере
 
-**Default credentials:**
-- Username: `admin`
-- Password: `admin123`
+**Учетные данные по умолчанию:**
+- Имя пользователя: `admin`
+- Пароль: `admin123`
 
-## 📋 Step-by-Step Testing
+## 📋 Пошаговое тестирование
 
-The web interface provides 7 testing steps:
+Веб-интерфейс предоставляет 7 шагов тестирования:
 
-1. **Create Windows User** - Creates User1, User2, etc. with RDP access
-2. **Create Android AVD** - Sets up phone1, phone2, etc. virtual devices
-3. **Create Batch File** - Generates emulator launch scripts
-4. **Convert to EXE** - Converts batch files to executables
-5. **Configure RemoteApp** - Sets up Windows Registry for RemoteApp
-6. **Create RDP File** - Generates connection files for clients
-7. **Test Microphone** - Validates audio input functionality
+1. **Создание пользователя Windows** - Создает User1, User2 и т.д. с RDP доступом
+2. **Создание Android AVD** - Настраивает виртуальные устройства phone1, phone2 и т.д.
+3. **Создание Batch файла** - Генерирует скрипты запуска эмулятора
+4. **Конвертация в EXE** - Преобразует batch файлы в исполняемые файлы
+5. **Настройка RemoteApp** - Настраивает реестр Windows для RemoteApp
+6. **Создание RDP файла** - Генерирует файлы подключения для клиентов
+7. **Тест микрофона** - Проверяет функциональность аудио входа
 
-## 🎤 Microphone Fix
+## 🎤 Исправление микрофона
 
-The solution addresses the common 3-second microphone cutoff issue in RemoteApp sessions through:
+Решение устраняет распространенную проблему 3-секундного отключения микрофона в RemoteApp сессиях через:
 
-- **AVD Configuration**: `hw.audioInput=yes`, `hw.audioOutput=yes`
-- **Registry Tweaks**: `MaxConnectionTime=0`, `fDisableAudioCapture=0`
-- **Emulator Flags**: `-audio-in on -audio-out on`
-- **Group Policy**: Disabled session timeouts
+- **Конфигурация AVD**: `hw.audioInput=yes`, `hw.audioOutput=yes`
+- **Настройки реестра**: `MaxConnectionTime=0`, `fDisableAudioCapture=0`
+- **Флаги эмулятора**: `-audio-in on -audio-out on`
+- **Групповая политика**: Отключены таймауты сессий
 
-## 🔧 Configuration
+## 🔧 Конфигурация
 
-### Main Script Parameters
-- **User naming**: User1, User2, User3... (sequential)
-- **Phone naming**: phone1, phone2, phone3... (matching user numbers)
-- **Password policy**: 16-character GUID, no expiration, user cannot change
-- **Groups**: Automatically added to Users and Remote Desktop Users
+### Параметры основного скрипта
+- **Именование пользователей**: User1, User2, User3... (последовательно)
+- **Именование телефонов**: phone1, phone2, phone3... (соответствует номерам пользователей)
+- **Политика паролей**: 16-символьный GUID, без истечения, пользователь не может изменить
+- **Группы**: Автоматически добавляются в группы "Пользователи" и "Пользователи удаленного рабочего стола"
 
-### Security Features
-- Admin authentication for web interface
-- Unique user/password generation
-- File permission restrictions with `icacls`
-- Comprehensive logging for audit trail
+### Функции безопасности
+- Аутентификация администратора для веб-интерфейса
+- Уникальная генерация пользователей/паролей
+- Ограничения прав доступа к файлам с помощью `icacls`
+- Комплексное логирование для аудита
 
-## 📝 Logging
+## 📝 Логирование
 
-All operations are logged to:
-- `C:\Scripts\log.txt` - Main automation log
-- `C:\Scripts\web_log.txt` - Web interface log
+Все операции логируются в:
+- `C:\Scripts\log.txt` - Основной лог автоматизации
+- `C:\Scripts\web_log.txt` - Лог веб-интерфейса
 
-## 🐛 Troubleshooting
+## 🐛 Устранение неполадок
 
-Common issues and solutions:
+Распространенные проблемы и решения:
 
-1. **User creation fails**: Check if running as Administrator
-2. **Groups not found**: System uses SID-based group detection
-3. **AVD creation fails**: Verify Android SDK installation path
-4. **Microphone not working**: Run `ConfigureGroupPolicy.ps1`
-5. **RemoteApp not launching**: Check Registry settings and file permissions
+1. **Не удается создать пользователя**: Проверьте, запущено ли от имени администратора
+2. **Группы не найдены**: Система использует определение групп по SID
+3. **Не удается создать AVD**: Проверьте путь установки Android SDK
+4. **Микрофон не работает**: Запустите `ConfigureGroupPolicy.ps1`
+5. **RemoteApp не запускается**: Проверьте настройки реестра и права доступа к файлам
 
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed solutions.
+См. [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) для подробных решений.
 
-## 📚 Documentation
+## 📚 Документация
 
-- [SETUP.md](docs/SETUP.md) - Detailed setup instructions (Russian)
-- [TESTING.md](docs/TESTING.md) - Testing procedures (Russian)
-- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Problem resolution
+- [SETUP.md](docs/SETUP.md) - Подробные инструкции по установке (русский)
+- [TESTING.md](docs/TESTING.md) - Процедуры тестирования (русский)
+- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Решение проблем (русский)
 
-## 🤝 Contributing
+## 🤝 Участие в разработке
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Сделайте форк репозитория
+2. Создайте ветку для новой функции (`git checkout -b feature/amazing-feature`)
+3. Зафиксируйте изменения (`git commit -m 'Add amazing feature'`)
+4. Отправьте в ветку (`git push origin feature/amazing-feature`)
+5. Откройте Pull Request
 
-## 📄 License
+## 📄 Лицензия
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Этот проект лицензирован под MIT License - см. файл [LICENSE](LICENSE) для деталей.
 
-## 🙏 Acknowledgments
+## 🙏 Благодарности
 
-- Android SDK team for emulator tools
-- Microsoft for RemoteApp technology
-- Community contributors for troubleshooting solutions
+- Команде Android SDK за инструменты эмулятора
+- Microsoft за технологию RemoteApp
+- Участникам сообщества за решения проблем
 
-## 📞 Support
+## 📞 Поддержка
 
-For support and questions:
-- Create an issue in this repository
-- Check the troubleshooting guide
-- Review the documentation
+Для поддержки и вопросов:
+- Создайте issue в этом репозитории
+- Проверьте руководство по устранению неполадок
+- Изучите документацию
 
 ---
 
-**Note**: This solution is designed for Windows Server environments and requires administrative privileges for proper operation.
+**Примечание**: Это решение предназначено для сред Windows Server и требует административных привилегий для правильной работы.
