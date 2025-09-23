@@ -1,0 +1,28 @@
+{
+    "android_sdk":  {
+                        "sdk_root":  "C:\\Users\\user\\AppData\\Local\\Android\\Sdk",
+                        "cmdline_tools":  null,
+                        "avdmanager":  null,
+                        "sdkmanager":  null,
+                        "emulator":  "C:\\Users\\user\\AppData\\Local\\Android\\Sdk\\emulator\\emulator.exe"
+                    },
+    "system_images":  {
+                          "default":  "system-images;android-33;google_apis;x86_64",
+                          "playstore":  "system-images;android-33;google_apis_playstore;x86_64",
+                          "latest":  "system-images;android-34;google_apis;x86_64"
+                      },
+    "emulator_settings":  {
+                              "memory":  "2048",
+                              "gpu":  "host",
+                              "audio_in":  true,
+                              "audio_out":  true,
+                              "camera_back":  "webcam0",
+                              "camera_front":  "webcam0"
+                          },
+    "paths":  {
+                  "scripts_dir":  "C:\\Scripts",
+                  "downloads_dir":  "C:\\Scripts\\downloads",
+                  "log_file":  "C:\\Scripts\\log.txt",
+                  "bat_to_exe":  "C:\\Program Files\\Bat To Exe Converter\\Bat_To_Exe_Converter.exe"
+              }
+}

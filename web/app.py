@@ -79,14 +79,16 @@ def execute_powershell_step(step_name, script_content, user_context=None):
             for key, value in user_context.items():
                 script_content = script_content.replace(f"{{{{ {key} }}}}", str(value))
         
-        # Создаем временный скрипт для шага
+        # Создаем временный скрипт для шага с правильной кодировкой
         temp_script = f"C:\\Scripts\\temp_{step_name.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.ps1"
-        with open(temp_script, 'w', encoding='utf-8') as f:
+        
+        # Записываем файл с BOM для корректного чтения PowerShell
+        with open(temp_script, 'w', encoding='utf-8-sig') as f:
             f.write(script_content)
         
-        # Выполняем скрипт
-        cmd = f'powershell.exe -ExecutionPolicy Bypass -File "{temp_script}" 2>&1'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp866', timeout=300)
+        # Выполняем скрипт с правильной кодировкой
+        cmd = f'powershell.exe -ExecutionPolicy Bypass -File "{temp_script}"'
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=300)
         
         # Удаляем временный файл
         try:
