@@ -9,7 +9,7 @@ STEP_SCRIPTS = {
     'create_user': '''
 # Шаг 1: Создание пользователя Windows
 
-# Находим следующий доступный номер для пользователя
+# Поиск следующего доступного номера пользователя
 $UserNumber = 1
 do {
     $Username = "User$UserNumber"
@@ -29,38 +29,28 @@ New-LocalUser -Name $Username -Password $SecurePassword -FullName "Android Emula
 
 Write-Host "Пользователь $Username создан" -ForegroundColor Green
 
-# Добавляем в группы по SID (универсальные идентификаторы)
+# Добавляем в группы по SID
 $UsersGroupAdded = $false
 $RDPGroupAdded = $false
 
 # Группа Users (S-1-5-32-545)
-try {
-    $UsersGroup = Get-LocalGroup -SID "S-1-5-32-545" -ErrorAction Stop
-    Add-LocalGroupMember -Group $UsersGroup.Name -Member $Username -ErrorAction Stop
+$UsersGroup = Get-LocalGroup -SID "S-1-5-32-545" -ErrorAction SilentlyContinue
+if ($UsersGroup) {
+    Add-LocalGroupMember -Group $UsersGroup.Name -Member $Username -ErrorAction SilentlyContinue
     Write-Host "Добавлен в группу Users: $($UsersGroup.Name)" -ForegroundColor Green
     $UsersGroupAdded = $true
-} catch {
-    if ($_.Exception.Message -like "*already a member*" -or $_.Exception.Message -like "*уже является*") {
-        Write-Host "Пользователь уже в группе Users" -ForegroundColor Yellow
-        $UsersGroupAdded = $true
-    } else {
-        Write-Host "Ошибка добавления в группу Users: $($_.Exception.Message)" -ForegroundColor Red
-    }
+} else {
+    Write-Host "Не удалось найти группу Users" -ForegroundColor Red
 }
 
 # Группа Remote Desktop Users (S-1-5-32-555)
-try {
-    $RDPGroup = Get-LocalGroup -SID "S-1-5-32-555" -ErrorAction Stop
-    Add-LocalGroupMember -Group $RDPGroup.Name -Member $Username -ErrorAction Stop
+$RDPGroup = Get-LocalGroup -SID "S-1-5-32-555" -ErrorAction SilentlyContinue
+if ($RDPGroup) {
+    Add-LocalGroupMember -Group $RDPGroup.Name -Member $Username -ErrorAction SilentlyContinue
     Write-Host "Добавлен в группу RDP: $($RDPGroup.Name)" -ForegroundColor Green
     $RDPGroupAdded = $true
-} catch {
-    if ($_.Exception.Message -like "*already a member*" -or $_.Exception.Message -like "*уже является*") {
-        Write-Host "Пользователь уже в группе RDP" -ForegroundColor Yellow
-        $RDPGroupAdded = $true
-    } else {
-        Write-Host "Ошибка добавления в группу RDP: $($_.Exception.Message)" -ForegroundColor Red
-    }
+} else {
+    Write-Host "Не удалось найти группу Remote Desktop Users" -ForegroundColor Red
 }
 
 # Результат
