@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Android Emulator Manager - Пошаговое тестирование</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 2rem;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .login-form {
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e1e5e9;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            margin: 5px;
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-success { background: linear-gradient(135deg, #28a745 0%, #20c997 100%); }
+        .btn-danger { background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%); }
+        .btn-warning { background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%); color: #333; }
+        
+        .step-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        
+        .step-card {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: all 0.3s;
+        }
+        
+        .step-card.success { border-color: #28a745; background: #d4edda; }
+        .step-card.error { border-color: #dc3545; background: #f8d7da; }
+        .step-card.running { border-color: #ffc107; background: #fff3cd; }
+        
+        .step-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        .step-output {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 1rem;
+            display: none;
+        }
+        
+        .step-output.show { display: block; }
+        
+        .alert {
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+        
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-danger { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        
+        .hidden { display: none; }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .user-info {
+            background: #e3f2fd;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+        
+        .logout-btn {
+            float: right;
+            background: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Android Emulator Manager</h1>
+            <p>Система пошагового тестирования RemoteApp</p>
+        </div>
+
+        <!-- Форма входа -->
+        <div id="loginSection" class="card">
+            <div class="login-form">
+                <h2 style="text-align: center; margin-bottom: 1.5rem;">🔐 Вход в систему</h2>
+                <div id="loginAlert"></div>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="username">Имя пользователя</label>
+                        <input type="text" id="username" name="username" value="admin" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Пароль</label>
+                        <input type="password" id="password" name="password" value="admin123" required>
+                    </div>
+                    <button type="submit" class="btn" style="width: 100%;">Войти в систему</button>
+                </form>
+                <div style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 5px; font-size: 0.9rem; color: #666;">
+                    <strong>Тестовые данные:</strong><br>
+                    Логин: admin<br>
+                    Пароль: admin123<br>
+                    <em>⚠️ Измените пароль в продакшене!</em>
+                </div>
+            </div>
+        </div>
+
+        <!-- Панель управления -->
+        <div id="dashboardSection" class="hidden">
+            <div class="card">
+                <div class="user-info">
+                    <button id="logoutBtn" class="btn logout-btn">Выход</button>
+                    <strong>👤 Добро пожаловать, администратор!</strong><br>
+                    <small>Система готова к тестированию</small>
+                </div>
+                
+                <h2>📋 Пошаговое тестирование</h2>
+                <p style="color: #666; margin-bottom: 2rem;">
+                    Протестируйте каждый этап создания RemoteApp сессии отдельно для диагностики проблем.
+                </p>
+                
+                <div style="margin-bottom: 2rem;">
+                    <button id="testAllBtn" class="btn btn-success">🚀 Запустить все шаги</button>
+                    <button id="createPhoneBtn" class="btn btn-warning">📱 Создать телефон (полная настройка)</button>
+                    <button id="clearResultsBtn" class="btn btn-danger">🗑️ Очистить результаты</button>
+                </div>
+                
+                <div id="stepContainer" class="step-container">
+                    <!-- Шаги будут добавлены динамически -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let authToken = null;
+        const API_BASE = '/api';
+        
+        // Элементы DOM
+        const loginSection = document.getElementById('loginSection');
+        const dashboardSection = document.getElementById('dashboardSection');
+        const loginForm = document.getElementById('loginForm');
+        const loginAlert = document.getElementById('loginAlert');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const stepContainer = document.getElementById('stepContainer');
+        const testAllBtn = document.getElementById('testAllBtn');
+        const createPhoneBtn = document.getElementById('createPhoneBtn');
+        const clearResultsBtn = document.getElementById('clearResultsBtn');
+        
+        // Информация о шагах
+        const steps = {
+            'create_user': {
+                title: '1️⃣ Создание пользователя Windows',
+                description: 'Создает нового пользователя Windows с уникальным именем и добавляет его в группу Remote Desktop Users'
+            },
+            'create_avd': {
+                title: '2️⃣ Создание Android Virtual Device',
+                description: 'Создает новый AVD с оптимизированными настройками для RemoteApp'
+            },
+            'create_batch': {
+                title: '3️⃣ Создание batch файла',
+                description: 'Генерирует batch файл для запуска эмулятора с правильными параметрами (исправляет cd /c на cd /d)'
+            },
+            'convert_to_exe': {
+                title: '4️⃣ Конвертация в EXE',
+                description: 'Конвертирует batch файл в исполняемый EXE файл с помощью Bat To Exe Converter'
+            },
+            'configure_remoteapp': {
+                title: '5️⃣ Настройка RemoteApp',
+                description: 'Регистрирует приложение в реестре Windows для работы через RemoteApp'
+            },
+            'create_rdp': {
+                title: '6️⃣ Создание RDP файла',
+                description: 'Генерирует RDP файл с настройками микрофона и оптимизацией для RemoteApp'
+            },
+            'test_microphone': {
+                title: '7️⃣ Тестирование микрофона',
+                description: 'Проверяет и настраивает все параметры для корректной работы микрофона в RemoteApp'
+            }
+        };
+        
+        // Функции API
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            };
+            
+            if (authToken) {
+                options.headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            
+            if (data) {
+                options.body = JSON.stringify(data);
+            }
+            
+            try {
+                const response = await fetch(API_BASE + endpoint, options);
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || 'Ошибка API');
+                }
+                
+                return result;
+            } catch (error) {
+                console.error('API Error:', error);
+                throw error;
+            }
+        }
+        
+        // Авторизация
+        async function login(username, password) {
+            try {
+                const result = await apiCall('/login', 'POST', { username, password });
+                authToken = result.token;
+                showDashboard();
+                showAlert('Успешный вход в систему!', 'success');
+            } catch (error) {
+                showAlert('Ошибка входа: ' + error.message, 'danger', loginAlert);
+            }
+        }
+        
+        // Выход
+        async function logout() {
+            try {
+                await apiCall('/logout', 'POST');
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+            authToken = null;
+            showLogin();
+        }
+        
+        // Тестирование шага
+        async function testStep(stepName) {
+            const stepCard = document.getElementById(`step-${stepName}`);
+            const stepBtn = stepCard.querySelector('.step-btn');
+            const stepOutput = stepCard.querySelector('.step-output');
+            const stepStatus = stepCard.querySelector('.step-status');
+            
+            // Показываем состояние загрузки
+            stepCard.className = 'step-card running';
+            stepBtn.disabled = true;
+            stepBtn.innerHTML = '<div class="loading"></div>Выполняется...';
+            stepStatus.textContent = 'Выполняется...';
+            stepOutput.textContent = '';
+            stepOutput.classList.remove('show');
+            
+            try {
+                const result = await apiCall('/test_step', 'POST', { step: stepName });
+                
+                if (result.success) {
+                    stepCard.className = 'step-card success';
+                    stepStatus.textContent = '✅ Выполнено успешно';
+                    
+                    // Показываем дополнительную информацию
+                    let additionalInfo = '';
+                    if (result.username) additionalInfo += `Пользователь: ${result.username}\n`;
+                    if (result.password) additionalInfo += `Пароль: ${result.password}\n`;
+                    if (result.avd_name) additionalInfo += `AVD: ${result.avd_name}\n`;
+                    if (result.batch_file) additionalInfo += `Batch файл: ${result.batch_file}\n`;
+                    if (result.exe_file) additionalInfo += `EXE файл: ${result.exe_file}\n`;
+                    if (result.app_name) additionalInfo += `Приложение: ${result.app_name}\n`;
+                    if (result.rdp_file) additionalInfo += `RDP файл: ${result.rdp_file}\n`;
+                    if (result.microphone_status) additionalInfo += `Микрофон: ${result.microphone_status}\n`;
+                    
+                    stepOutput.textContent = additionalInfo + '\n' + result.output;
+                } else {
+                    stepCard.className = 'step-card error';
+                    stepStatus.textContent = '❌ Ошибка выполнения';
+                    stepOutput.textContent = result.error || result.output;
+                }
+                
+                stepOutput.classList.add('show');
+            } catch (error) {
+                stepCard.className = 'step-card error';
+                stepStatus.textContent = '❌ Ошибка API';
+                stepOutput.textContent = error.message;
+                stepOutput.classList.add('show');
+            }
+            
+            stepBtn.disabled = false;
+            stepBtn.textContent = 'Запустить шаг';
+        }
+        
+        // Создание телефона
+        async function createPhone() {
+            createPhoneBtn.disabled = true;
+            createPhoneBtn.innerHTML = '<div class="loading"></div>Создается телефон...';
+            
+            try {
+                const result = await apiCall('/create_phone', 'POST', {
+                    name: 'Test Android Phone',
+                    model: 'Pixel 6',
+                    apiLevel: 'API 33'
+                });
+                
+                if (result.success) {
+                    showAlert('Телефон создан успешно! Проверьте результаты в шагах выше.', 'success');
+                } else {
+                    showAlert('Ошибка создания телефона: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                showAlert('Ошибка API: ' + error.message, 'danger');
+            }
+            
+            createPhoneBtn.disabled = false;
+            createPhoneBtn.textContent = '📱 Создать телефон (полная настройка)';
+        }
+        
+        // Запуск всех шагов
+        async function testAllSteps() {
+            testAllBtn.disabled = true;
+            testAllBtn.innerHTML = '<div class="loading"></div>Выполняются все шаги...';
+            
+            for (const stepName of Object.keys(steps)) {
+                await testStep(stepName);
+                // Небольшая пауза между шагами
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            testAllBtn.disabled = false;
+            testAllBtn.textContent = '🚀 Запустить все шаги';
+            showAlert('Все шаги выполнены! Проверьте результаты.', 'info');
+        }
+        
+        // Очистка результатов
+        function clearResults() {
+            Object.keys(steps).forEach(stepName => {
+                const stepCard = document.getElementById(`step-${stepName}`);
+                stepCard.className = 'step-card';
+                stepCard.querySelector('.step-status').textContent = 'Готов к запуску';
+                stepCard.querySelector('.step-output').classList.remove('show');
+            });
+            showAlert('Результаты очищены', 'info');
+        }
+        
+        // Показать уведомление
+        function showAlert(message, type, container = null) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.textContent = message;
+            
+            if (container) {
+                container.innerHTML = '';
+                container.appendChild(alertDiv);
+            } else {
+                const existingAlert = document.querySelector('.alert');
+                if (existingAlert) {
+                    existingAlert.remove();
+                }
+                dashboardSection.insertBefore(alertDiv, dashboardSection.firstChild);
+                
+                // Автоматически скрыть через 5 секунд
+                setTimeout(() => {
+                    alertDiv.remove();
+                }, 5000);
+            }
+        }
+        
+        // Показать панель входа
+        function showLogin() {
+            loginSection.classList.remove('hidden');
+            dashboardSection.classList.add('hidden');
+        }
+        
+        // Показать панель управления
+        function showDashboard() {
+            loginSection.classList.add('hidden');
+            dashboardSection.classList.remove('hidden');
+            createStepCards();
+        }
+        
+        // Создать карточки шагов
+        function createStepCards() {
+            stepContainer.innerHTML = '';
+            
+            Object.entries(steps).forEach(([stepName, stepInfo]) => {
+                const stepCard = document.createElement('div');
+                stepCard.className = 'step-card';
+                stepCard.id = `step-${stepName}`;
+                
+                stepCard.innerHTML = `
+                    <div class="step-title">${stepInfo.title}</div>
+                    <div class="step-status">Готов к запуску</div>
+                    <p style="color: #666; font-size: 0.9rem; margin: 1rem 0;">${stepInfo.description}</p>
+                    <button class="btn step-btn" onclick="testStep('${stepName}')">Запустить шаг</button>
+                    <div class="step-output"></div>
+                `;
+                
+                stepContainer.appendChild(stepCard);
+            });
+        }
+        
+        // Обработчики событий
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            await login(username, password);
+        });
+        
+        logoutBtn.addEventListener('click', logout);
+        testAllBtn.addEventListener('click', testAllSteps);
+        createPhoneBtn.addEventListener('click', createPhone);
+        clearResultsBtn.addEventListener('click', clearResults);
+        
+        // Инициализация
+        showLogin();
+    </script>
+</body>
+</html>
