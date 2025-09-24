@@ -8,6 +8,8 @@ Android Emulator RemoteApp Flask API
 """
 
 import os
+import tempfile
+import ctypes
 import re
 import json
 import logging
@@ -74,6 +76,33 @@ def execute_powershell_step(step_name, script_content, user_context=None):
     try:
         write_log(f"Выполнение шага: {step_name}")
         
+        # Проверяем права администратора для шагов, требующих повышенных прав
+        admin_required_steps = {
+            'create_user',
+            'create_avd',
+            'create_batch',
+            'convert_to_exe',
+            'configure_remoteapp',
+            'create_rdp',
+            'test_microphone'
+        }
+        try:
+            is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            is_admin = False
+        if step_name in admin_required_steps and not is_admin:
+            msg = (
+                "Требуются права администратора для выполнения шага '"
+                + step_name + "'. Запустите сервер Flask/PowerShell от имени администратора."
+            )
+            write_log(msg, 'ERROR')
+            return {
+                'success': False,
+                'output': msg,
+                'step': step_name,
+                'timestamp': datetime.now().isoformat()
+            }
+        
         # Подставляем контекст пользователя в скрипт если нужно
         if user_context:
             for key, value in user_context.items():
@@ -81,24 +110,87 @@ def execute_powershell_step(step_name, script_content, user_context=None):
         
         # Создаем временный скрипт для шага с правильной кодировкой
         temp_script = f"C:\\Scripts\\temp_{step_name.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.ps1"
+        transcripts_dir = os.path.join(tempfile.gettempdir(), 'emulator_transcripts')
+        os.makedirs(transcripts_dir, exist_ok=True)
+        transcript_path = os.path.join(transcripts_dir, f"transcript_{step_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
         
+        # Принудительно устанавливаем UTF-8 для корректной кодировки вывода
+        utf8_preamble = (
+            "$ErrorActionPreference = 'Continue'\n"
+            "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+            "$OutputEncoding = [System.Text.Encoding]::UTF8\n"
+        )
+        # Оборачиваем в транскрипцию, чтобы перехватить Write-Host/хост-вывод
+        wrapped = (
+            f"Write-Output '[[STEP {step_name} START]]'\n" 
+            f"Start-Transcript -Path '{transcript_path}' -Append | Out-Null\n" 
+            + script_content +
+            "\nStop-Transcript | Out-Null\n"
+            "Write-Output '[[STEP END]]'\n"
+            "exit 0\n"
+        )
+        final_script_content = utf8_preamble + wrapped
+
         # Записываем файл с BOM для корректного чтения PowerShell
         with open(temp_script, 'w', encoding='utf-8-sig') as f:
-            f.write(script_content)
+            f.write(final_script_content)
         
         # Выполняем скрипт с правильной кодировкой
-        cmd = f'powershell.exe -ExecutionPolicy Bypass -File "{temp_script}"'
+        # Use -NoProfile, enable Information stream, and merge all streams to stdout so Write-Host is captured
+        # PowerShell stream redirection: *>&1 merges all streams (success, error, warning, verbose, debug, information) into stdout
+        cmd = (
+            f'powershell.exe -NoProfile -ExecutionPolicy Bypass '
+            f'-File "{temp_script}" -InformationAction Continue *>&1 | Out-String'
+        )
+        write_log(f"Запуск PowerShell: temp_script={temp_script}, transcript={transcript_path}")
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=300)
         
-        # Удаляем временный файл
+        # Не удаляем временный файл сразу — полезно для отладки. Оставим копию.
         try:
-            os.remove(temp_script)
-        except:
+            debug_copy = os.path.join(os.path.dirname(LOG_FILE), 'debug_last_step.ps1')
+            os.makedirs(os.path.dirname(debug_copy), exist_ok=True)
+            with open(debug_copy, 'w', encoding='utf-8-sig') as df:
+                with open(temp_script, 'r', encoding='utf-8-sig', errors='ignore') as sf:
+                    df.write(sf.read())
+        except Exception:
             pass
         
         success = result.returncode == 0
-        output = result.stdout + result.stderr
+        # Safely handle potential None values for stdout/stderr
+        stdout_text = result.stdout if result.stdout is not None else ''
+        stderr_text = result.stderr if result.stderr is not None else ''
+        output = stdout_text + stderr_text
+
+        # Если прямой вывод пуст, пробуем прочитать транскрипт
+        if not output.strip():
+            try:
+                if os.path.exists(transcript_path):
+                    try:
+                        sz = os.path.getsize(transcript_path)
+                        write_log(f"Обнаружен транскрипт: {transcript_path} ({sz} bytes)")
+                    except Exception:
+                        pass
+                    with open(transcript_path, 'r', encoding='utf-8', errors='ignore') as tf:
+                        output = tf.read()
+            except Exception:
+                pass
+
+        # Диагностика: записываем полный вывод шага в файл для отладки
+        try:
+            os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+            debug_out_path = os.path.join(os.path.dirname(LOG_FILE), f"last_step_output_{step_name}.txt")
+            with open(debug_out_path, 'w', encoding='utf-8') as df:
+                df.write(output)
+        except Exception:
+            pass
         
+        # Логируем превью вывода (первые 500 символов) и статус
+        try:
+            preview = (output[:500] + '...') if len(output) > 500 else output
+            write_log(f"Вывод шага '{step_name}': {preview}")
+        except Exception:
+            pass
         write_log(f"Шаг '{step_name}' {'выполнен успешно' if success else 'завершился с ошибкой'}")
         
         return {
@@ -209,7 +301,9 @@ def api_create_phone():
         
         if result.returncode == 0:
             # Парсим результат
-            parsed = parse_full_setup_output(result.stdout + result.stderr)
+            stdout_text = result.stdout if result.stdout is not None else ''
+            stderr_text = result.stderr if result.stderr is not None else ''
+            parsed = parse_full_setup_output(stdout_text + stderr_text)
             
             # Создаем запись телефона в базе
             phone_id = str(uuid.uuid4())
@@ -240,7 +334,9 @@ def api_create_phone():
                 'setup_output': result.stdout + result.stderr
             })
         else:
-            error_msg = f"Ошибка создания телефона: {result.stdout + result.stderr}"
+            stdout_text = result.stdout if result.stdout is not None else ''
+            stderr_text = result.stderr if result.stderr is not None else ''
+            error_msg = f"Ошибка создания телефона: {stdout_text + stderr_text}"
             write_log(error_msg, 'ERROR')
             return jsonify({
                 'success': False,
