@@ -307,8 +307,20 @@ $AvdName = "User$UserNum`_Emulator"
 Write-Host "Создание AVD с уникальным именем: $AvdName" -ForegroundColor Cyan
 
 # Устанавливаем ANDROID_AVD_HOME для конкретного пользователя
+# ВАЖНО: Используем ту же логику, что и в batch файле
 $UserProfilePath = "C:\\Users\\$LastValidUser"
+$UserProfilePathHP = "C:\\Users\\$LastValidUser.HP"
+
+# Приоритет отдаем .HP директории, если она существует (как в batch файле)
+if (Test-Path "$UserProfilePathHP\\.android\\avd" -or Test-Path $UserProfilePathHP) {
+    Write-Host "Используется директория с суффиксом .HP: $UserProfilePathHP" -ForegroundColor Yellow
+    $UserProfilePath = $UserProfilePathHP
+} else {
+    Write-Host "Используется обычная директория: $UserProfilePath" -ForegroundColor Yellow
+}
+
 $env:ANDROID_AVD_HOME = "$UserProfilePath\\.android\\avd"
+Write-Host "Финальный ANDROID_AVD_HOME: $env:ANDROID_AVD_HOME" -ForegroundColor Cyan
 
 $AvdManagerPath = "$AndroidHome\\cmdline-tools\\latest\\bin\\avdmanager.bat"
 
@@ -442,7 +454,14 @@ REM Устанавливаем переменные окружения Android S
 set ANDROID_HOME=C:\\Program Files\\Android
 set ANDROID_SDK_ROOT=C:\\Program Files\\Android
 set JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.16.8-hotspot
-set ANDROID_AVD_HOME=C:\\Users\\$TestUser\\.android\\avd
+REM Проверяем наличие директории с суффиксом .HP (приоритет HP директории)
+if exist "C:\\Users\\$TestUser.HP" (
+    set ANDROID_AVD_HOME=C:\\Users\\$TestUser.HP\\.android\\avd
+    echo Используется директория с суффиксом .HP: %ANDROID_AVD_HOME%
+) else (
+    set ANDROID_AVD_HOME=C:\\Users\\$TestUser\\.android\\avd
+    echo Используется обычная директория: %ANDROID_AVD_HOME%
+)
 set PATH=%JAVA_HOME%\\bin;%ANDROID_HOME%\\platform-tools;%ANDROID_HOME%\\emulator;%ANDROID_HOME%\\cmdline-tools\\latest\\bin;%PATH%
 
 echo Переменные окружения:
