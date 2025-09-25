@@ -3,517 +3,637 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android Emulator Manager - Пошаговое тестирование</title>
+    <title>Android Emulator RemoteApp - Управление операторами</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
+        .main-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
         }
         
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 2rem;
-        }
-        
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
         .card {
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            padding: 2rem;
-            margin-bottom: 2rem;
-        }
-        
-        .login-form {
-            max-width: 400px;
-            margin: 0 auto;
-        }
-        
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px solid #e1e5e9;
-            border-radius: 5px;
-            font-size: 1rem;
-        }
-        
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
             border: none;
-            border-radius: 5px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            margin: 5px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+        }
+        
+        .btn-success {
+            background: linear-gradient(45deg, #56ab2f, #a8e6cf);
+            border: none;
+        }
+        
+        .btn-info {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            border: none;
+        }
+        
+        .operator-card {
+            border-left: 4px solid #667eea;
             transition: transform 0.2s;
         }
         
-        .btn:hover {
+        .operator-card:hover {
             transform: translateY(-2px);
         }
         
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
+        .emulator-card {
+            border-left: 4px solid #56ab2f;
         }
         
-        .btn-success { background: linear-gradient(135deg, #28a745 0%, #20c997 100%); }
-        .btn-danger { background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%); }
-        .btn-warning { background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%); color: #333; }
-        
-        .step-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1rem;
-            margin: 2rem 0;
-        }
-        
-        .step-card {
-            background: #f8f9fa;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
-            padding: 1.5rem;
-            transition: all 0.3s;
-        }
-        
-        .step-card.success { border-color: #28a745; background: #d4edda; }
-        .step-card.error { border-color: #dc3545; background: #f8d7da; }
-        .step-card.running { border-color: #ffc107; background: #fff3cd; }
-        
-        .step-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-        }
-        
-        .step-output {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 1rem;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            max-height: 200px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            margin-top: 1rem;
+        .hidden {
             display: none;
         }
         
-        .step-output.show { display: block; }
-        
-        .alert {
-            padding: 1rem;
-            border-radius: 5px;
-            margin-bottom: 1rem;
-        }
-        
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-danger { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-        
-        .hidden { display: none; }
-        
         .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 10px;
+            text-align: center;
+            padding: 20px;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .user-info {
-            background: #e3f2fd;
-            padding: 1rem;
-            border-radius: 5px;
-            margin-bottom: 1rem;
-        }
-        
-        .logout-btn {
-            float: right;
-            background: #6c757d;
+        .status-badge {
+            font-size: 0.8em;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🤖 Android Emulator Manager</h1>
-            <p>Система пошагового тестирования RemoteApp</p>
-        </div>
-
-        <!-- Форма входа -->
-        <div id="loginSection" class="card">
-            <div class="login-form">
-                <h2 style="text-align: center; margin-bottom: 1.5rem;">🔐 Вход в систему</h2>
-                <div id="loginAlert"></div>
-                <form id="loginForm">
-                    <div class="form-group">
-                        <label for="username">Имя пользователя</label>
-                        <input type="text" id="username" name="username" value="admin" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="password">Пароль</label>
-                        <input type="password" id="password" name="password" value="admin123" required>
-                    </div>
-                    <button type="submit" class="btn" style="width: 100%;">Войти в систему</button>
-                </form>
-                <div style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 5px; font-size: 0.9rem; color: #666;">
-                    <strong>Тестовые данные:</strong><br>
-                    Логин: admin<br>
-                    Пароль: admin123<br>
-                    <em>⚠️ Измените пароль в продакшене!</em>
+    <div class="container-fluid">
+        <!-- Навигационная панель -->
+        <nav class="navbar navbar-expand-lg navbar-dark" style="background: rgba(0,0,0,0.1);">
+            <div class="container">
+                <a class="navbar-brand" href="#">
+                    <i class="fas fa-mobile-alt me-2"></i>
+                    Android Emulator RemoteApp
+                </a>
+                <div class="navbar-nav ms-auto">
+                    <span class="navbar-text me-3" id="userInfo"></span>
+                    <button class="btn btn-outline-light btn-sm" onclick="logout()" id="logoutBtn" style="display: none;">
+                        <i class="fas fa-sign-out-alt"></i> Выход
+                    </button>
                 </div>
             </div>
-        </div>
+        </nav>
 
-        <!-- Панель управления -->
-        <div id="dashboardSection" class="hidden">
-            <div class="card">
-                <div class="user-info">
-                    <button id="logoutBtn" class="btn logout-btn">Выход</button>
-                    <strong>👤 Добро пожаловать, администратор!</strong><br>
-                    <small>Система готова к тестированию</small>
+        <!-- Основной контент -->
+        <div class="container mt-4">
+            <!-- Форма входа администратора -->
+            <div id="adminLoginForm" class="row justify-content-center">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header text-center">
+                            <h4><i class="fas fa-user-shield me-2"></i>Вход администратора</h4>
+                        </div>
+                        <div class="card-body">
+                            <form onsubmit="adminLogin(event)">
+                                <div class="mb-3">
+                                    <label class="form-label">Логин</label>
+                                    <input type="text" class="form-control" id="adminUsername" value="admin" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Пароль</label>
+                                    <input type="password" class="form-control" id="adminPassword" value="admin123" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-sign-in-alt me-2"></i>Войти
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Панель администратора -->
+            <div id="adminPanel" class="hidden">
+                <div class="row mb-4">
+                    <div class="col">
+                        <h2><i class="fas fa-users me-2"></i>Управление операторами</h2>
+                        <button class="btn btn-success" onclick="createOperator()">
+                            <i class="fas fa-user-plus me-2"></i>Создать оператора
+                        </button>
+                    </div>
                 </div>
                 
-                <h2>📋 Пошаговое тестирование</h2>
-                <p style="color: #666; margin-bottom: 2rem;">
-                    Протестируйте каждый этап создания RemoteApp сессии отдельно для диагностики проблем.
-                </p>
-                
-                <div style="margin-bottom: 2rem;">
-                    <button id="testAllBtn" class="btn btn-success">🚀 Запустить все шаги</button>
-                    <button id="createPhoneBtn" class="btn btn-warning">📱 Создать телефон (полная настройка)</button>
-                    <button id="clearResultsBtn" class="btn btn-danger">🗑️ Очистить результаты</button>
+                <div class="row">
+                    <div class="col">
+                        <div id="operatorsList"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Форма входа оператора -->
+            <div id="operatorLoginForm" class="row justify-content-center hidden">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header text-center">
+                            <h4><i class="fas fa-user me-2"></i>Вход оператора</h4>
+                        </div>
+                        <div class="card-body">
+                            <form onsubmit="operatorLogin(event)">
+                                <div class="mb-3">
+                                    <label class="form-label">Логин</label>
+                                    <input type="text" class="form-control" id="operatorUsername" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Пароль</label>
+                                    <input type="password" class="form-control" id="operatorPassword" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-sign-in-alt me-2"></i>Войти
+                                </button>
+                            </form>
+                            <div class="text-center mt-3">
+                                <button class="btn btn-link" onclick="showAdminLogin()">
+                                    Вход администратора
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Панель оператора -->
+            <div id="operatorPanel" class="hidden">
+                <div class="row mb-4">
+                    <div class="col">
+                        <h2><i class="fas fa-mobile-alt me-2"></i>Мои эмуляторы</h2>
+                        <button class="btn btn-success" onclick="createEmulator()">
+                            <i class="fas fa-plus me-2"></i>Создать эмулятор
+                        </button>
+                    </div>
                 </div>
                 
-                <div id="stepContainer" class="step-container">
-                    <!-- Шаги будут добавлены динамически -->
+                <div class="row">
+                    <div class="col">
+                        <div id="emulatorsList"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Модальное окно создания эмулятора -->
+            <div class="modal fade" id="createEmulatorModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Создать новый эмулятор</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="createEmulatorForm">
+                                <div class="mb-3">
+                                    <label class="form-label">Название эмулятора</label>
+                                    <input type="text" class="form-control" id="emulatorName" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Тип устройства</label>
+                                    <select class="form-select" id="deviceType">
+                                        <option value="small_phone">Small Phone</option>
+                                        <option value="pixel_6">Pixel 6</option>
+                                        <option value="tablet">Tablet</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">API Level</label>
+                                    <select class="form-select" id="apiLevel">
+                                        <option value="android-36">Android 36 (API 36)</option>
+                                        <option value="android-34">Android 34 (API 34)</option>
+                                        <option value="android-33">Android 33 (API 33)</option>
+                                    </select>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                            <button type="button" class="btn btn-primary" onclick="submitCreateEmulator()">
+                                <i class="fas fa-plus me-2"></i>Создать
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Модальное окно прогресса -->
+            <div class="modal fade" id="progressModal" tabindex="-1" data-bs-backdrop="static">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="progressTitle">Выполнение операции...</h5>
+                        </div>
+                        <div class="modal-body">
+                            <div class="progress mb-3">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     id="progressBar" style="width: 0%"></div>
+                            </div>
+                            <div id="progressLog" style="max-height: 300px; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 0.9em;"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" id="progressCloseBtn" 
+                                    onclick="closeProgressModal()" style="display: none;">Закрыть</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        let authToken = null;
-        const API_BASE = '/api';
-        
-        // Элементы DOM
-        const loginSection = document.getElementById('loginSection');
-        const dashboardSection = document.getElementById('dashboardSection');
-        const loginForm = document.getElementById('loginForm');
-        const loginAlert = document.getElementById('loginAlert');
-        const logoutBtn = document.getElementById('logoutBtn');
-        const stepContainer = document.getElementById('stepContainer');
-        const testAllBtn = document.getElementById('testAllBtn');
-        const createPhoneBtn = document.getElementById('createPhoneBtn');
-        const clearResultsBtn = document.getElementById('clearResultsBtn');
-        
-        // Информация о шагах
-        const steps = {
-            'create_user': {
-                title: '1️⃣ Создание пользователя Windows',
-                description: 'Создает нового пользователя Windows с уникальным именем и добавляет его в группу Remote Desktop Users'
-            },
-            'create_avd': {
-                title: '2️⃣ Создание Android Virtual Device',
-                description: 'Создает новый AVD с оптимизированными настройками для RemoteApp'
-            },
-            'create_batch': {
-                title: '3️⃣ Создание batch файла',
-                description: 'Генерирует batch файл для запуска эмулятора с правильными параметрами (исправляет cd /c на cd /d)'
-            },
-            'convert_to_exe': {
-                title: '4️⃣ Конвертация в EXE',
-                description: 'Конвертирует batch файл в исполняемый EXE файл с помощью Bat To Exe Converter'
-            },
-            'configure_remoteapp': {
-                title: '5️⃣ Настройка RemoteApp',
-                description: 'Регистрирует приложение в реестре Windows для работы через RemoteApp'
-            },
-            'create_rdp': {
-                title: '6️⃣ Создание RDP файла',
-                description: 'Генерирует RDP файл с настройками микрофона и оптимизацией для RemoteApp'
-            },
-            'test_microphone': {
-                title: '7️⃣ Тестирование микрофона',
-                description: 'Проверяет и настраивает все параметры для корректной работы микрофона в RemoteApp'
-            }
-        };
-        
-        // Функции API
-        async function apiCall(endpoint, method = 'GET', data = null) {
-            const options = {
-                method,
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            };
-            
-            if (authToken) {
-                options.headers['Authorization'] = `Bearer ${authToken}`;
-            }
-            
-            if (data) {
-                options.body = JSON.stringify(data);
-            }
-            
-            try {
-                const response = await fetch(API_BASE + endpoint, options);
-                const result = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(result.error || 'Ошибка API');
-                }
-                
-                return result;
-            } catch (error) {
-                console.error('API Error:', error);
-                throw error;
-            }
-        }
-        
-        // Авторизация
-        async function login(username, password) {
-            try {
-                const result = await apiCall('/login', 'POST', { username, password });
-                authToken = result.token;
-                showDashboard();
-                showAlert('Успешный вход в систему!', 'success');
-            } catch (error) {
-                showAlert('Ошибка входа: ' + error.message, 'danger', loginAlert);
-            }
-        }
-        
-        // Выход
-        async function logout() {
-            try {
-                await apiCall('/logout', 'POST');
-            } catch (error) {
-                console.error('Logout error:', error);
-            }
-            authToken = null;
-            showLogin();
-        }
-        
-        // Тестирование шага
-        async function testStep(stepName) {
-            const stepCard = document.getElementById(`step-${stepName}`);
-            const stepBtn = stepCard.querySelector('.step-btn');
-            const stepOutput = stepCard.querySelector('.step-output');
-            const stepStatus = stepCard.querySelector('.step-status');
-            
-            // Показываем состояние загрузки
-            stepCard.className = 'step-card running';
-            stepBtn.disabled = true;
-            stepBtn.innerHTML = '<div class="loading"></div>Выполняется...';
-            stepStatus.textContent = 'Выполняется...';
-            stepOutput.textContent = '';
-            stepOutput.classList.remove('show');
-            
-            try {
-                const result = await apiCall('/test_step', 'POST', { step: stepName });
-                
-                if (result.success) {
-                    stepCard.className = 'step-card success';
-                    stepStatus.textContent = '✅ Выполнено успешно';
-                    
-                    // Показываем дополнительную информацию
-                    let additionalInfo = '';
-                    if (result.username) additionalInfo += `Пользователь: ${result.username}\n`;
-                    if (result.password) additionalInfo += `Пароль: ${result.password}\n`;
-                    if (result.avd_name) additionalInfo += `AVD: ${result.avd_name}\n`;
-                    if (result.batch_file) additionalInfo += `Batch файл: ${result.batch_file}\n`;
-                    if (result.exe_file) additionalInfo += `EXE файл: ${result.exe_file}\n`;
-                    if (result.app_name) additionalInfo += `Приложение: ${result.app_name}\n`;
-                    if (result.rdp_file) additionalInfo += `RDP файл: ${result.rdp_file}\n`;
-                    if (result.microphone_status) additionalInfo += `Микрофон: ${result.microphone_status}\n`;
-                    
-                    stepOutput.textContent = additionalInfo + '\n' + result.output;
-                } else {
-                    stepCard.className = 'step-card error';
-                    stepStatus.textContent = '❌ Ошибка выполнения';
-                    stepOutput.textContent = result.error || result.output;
-                }
-                
-                stepOutput.classList.add('show');
-            } catch (error) {
-                stepCard.className = 'step-card error';
-                stepStatus.textContent = '❌ Ошибка API';
-                stepOutput.textContent = error.message;
-                stepOutput.classList.add('show');
-            }
-            
-            stepBtn.disabled = false;
-            stepBtn.textContent = 'Запустить шаг';
-        }
-        
-        // Создание телефона
-        async function createPhone() {
-            createPhoneBtn.disabled = true;
-            createPhoneBtn.innerHTML = '<div class="loading"></div>Создается телефон...';
-            
-            try {
-                const result = await apiCall('/create_phone', 'POST', {
-                    name: 'Test Android Phone',
-                    model: 'Pixel 6',
-                    apiLevel: 'API 33'
-                });
-                
-                if (result.success) {
-                    showAlert('Телефон создан успешно! Проверьте результаты в шагах выше.', 'success');
-                } else {
-                    showAlert('Ошибка создания телефона: ' + result.error, 'danger');
-                }
-            } catch (error) {
-                showAlert('Ошибка API: ' + error.message, 'danger');
-            }
-            
-            createPhoneBtn.disabled = false;
-            createPhoneBtn.textContent = '📱 Создать телефон (полная настройка)';
-        }
-        
-        // Запуск всех шагов
-        async function testAllSteps() {
-            testAllBtn.disabled = true;
-            testAllBtn.innerHTML = '<div class="loading"></div>Выполняются все шаги...';
-            
-            for (const stepName of Object.keys(steps)) {
-                await testStep(stepName);
-                // Небольшая пауза между шагами
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-            
-            testAllBtn.disabled = false;
-            testAllBtn.textContent = '🚀 Запустить все шаги';
-            showAlert('Все шаги выполнены! Проверьте результаты.', 'info');
-        }
-        
-        // Очистка результатов
-        function clearResults() {
-            Object.keys(steps).forEach(stepName => {
-                const stepCard = document.getElementById(`step-${stepName}`);
-                stepCard.className = 'step-card';
-                stepCard.querySelector('.step-status').textContent = 'Готов к запуску';
-                stepCard.querySelector('.step-output').classList.remove('show');
-            });
-            showAlert('Результаты очищены', 'info');
-        }
-        
-        // Показать уведомление
-        function showAlert(message, type, container = null) {
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert alert-${type}`;
-            alertDiv.textContent = message;
-            
-            if (container) {
-                container.innerHTML = '';
-                container.appendChild(alertDiv);
-            } else {
-                const existingAlert = document.querySelector('.alert');
-                if (existingAlert) {
-                    existingAlert.remove();
-                }
-                dashboardSection.insertBefore(alertDiv, dashboardSection.firstChild);
-                
-                // Автоматически скрыть через 5 секунд
-                setTimeout(() => {
-                    alertDiv.remove();
-                }, 5000);
-            }
-        }
-        
-        // Показать панель входа
-        function showLogin() {
-            loginSection.classList.remove('hidden');
-            dashboardSection.classList.add('hidden');
-        }
-        
-        // Показать панель управления
-        function showDashboard() {
-            loginSection.classList.add('hidden');
-            dashboardSection.classList.remove('hidden');
-            createStepCards();
-        }
-        
-        // Создать карточки шагов
-        function createStepCards() {
-            stepContainer.innerHTML = '';
-            
-            Object.entries(steps).forEach(([stepName, stepInfo]) => {
-                const stepCard = document.createElement('div');
-                stepCard.className = 'step-card';
-                stepCard.id = `step-${stepName}`;
-                
-                stepCard.innerHTML = `
-                    <div class="step-title">${stepInfo.title}</div>
-                    <div class="step-status">Готов к запуску</div>
-                    <p style="color: #666; font-size: 0.9rem; margin: 1rem 0;">${stepInfo.description}</p>
-                    <button class="btn step-btn" onclick="testStep('${stepName}')">Запустить шаг</button>
-                    <div class="step-output"></div>
-                `;
-                
-                stepContainer.appendChild(stepCard);
-            });
-        }
-        
-        // Обработчики событий
-        loginForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            await login(username, password);
-        });
-        
-        logoutBtn.addEventListener('click', logout);
-        testAllBtn.addEventListener('click', testAllSteps);
-        createPhoneBtn.addEventListener('click', createPhone);
-        clearResultsBtn.addEventListener('click', clearResults);
-        
+        let currentToken = null;
+        let currentUserType = null;
+        let progressModal = null;
+        let createEmulatorModal = null;
+
         // Инициализация
-        showLogin();
+        document.addEventListener('DOMContentLoaded', function() {
+            progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
+            createEmulatorModal = new bootstrap.Modal(document.getElementById('createEmulatorModal'));
+            
+            // Проверяем сохраненный токен
+            const savedToken = localStorage.getItem('token');
+            const savedUserType = localStorage.getItem('userType');
+            if (savedToken && savedUserType) {
+                currentToken = savedToken;
+                currentUserType = savedUserType;
+                if (savedUserType === 'admin') {
+                    showAdminPanel();
+                } else {
+                    showOperatorPanel();
+                }
+            }
+        });
+
+        // Вход администратора
+        async function adminLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('adminUsername').value;
+            const password = document.getElementById('adminPassword').value;
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    currentToken = data.token;
+                    currentUserType = 'admin';
+                    localStorage.setItem('token', currentToken);
+                    localStorage.setItem('userType', currentUserType);
+                    showAdminPanel();
+                } else {
+                    alert('Ошибка входа: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
+        }
+
+        // Вход оператора
+        async function operatorLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('operatorUsername').value;
+            const password = document.getElementById('operatorPassword').value;
+
+            try {
+                const response = await fetch('/api/operator_login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    currentToken = data.token;
+                    currentUserType = 'operator';
+                    localStorage.setItem('token', currentToken);
+                    localStorage.setItem('userType', currentUserType);
+                    showOperatorPanel();
+                } else {
+                    alert('Ошибка входа: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
+        }
+
+        // Показать панель администратора
+        function showAdminPanel() {
+            document.getElementById('adminLoginForm').classList.add('hidden');
+            document.getElementById('operatorLoginForm').classList.add('hidden');
+            document.getElementById('operatorPanel').classList.add('hidden');
+            document.getElementById('adminPanel').classList.remove('hidden');
+            document.getElementById('logoutBtn').style.display = 'block';
+            document.getElementById('userInfo').textContent = 'Администратор';
+            loadOperators();
+        }
+
+        // Показать панель оператора
+        function showOperatorPanel() {
+            document.getElementById('adminLoginForm').classList.add('hidden');
+            document.getElementById('operatorLoginForm').classList.add('hidden');
+            document.getElementById('adminPanel').classList.add('hidden');
+            document.getElementById('operatorPanel').classList.remove('hidden');
+            document.getElementById('logoutBtn').style.display = 'block';
+            document.getElementById('userInfo').textContent = 'Оператор';
+            loadOperatorEmulators();
+        }
+
+        // Показать форму входа администратора
+        function showAdminLogin() {
+            document.getElementById('operatorLoginForm').classList.add('hidden');
+            document.getElementById('adminLoginForm').classList.remove('hidden');
+        }
+
+        // Показать форму входа оператора
+        function showOperatorLogin() {
+            document.getElementById('adminLoginForm').classList.add('hidden');
+            document.getElementById('operatorLoginForm').classList.remove('hidden');
+        }
+
+        // Выход
+        function logout() {
+            currentToken = null;
+            currentUserType = null;
+            localStorage.removeItem('token');
+            localStorage.removeItem('userType');
+            document.getElementById('adminPanel').classList.add('hidden');
+            document.getElementById('operatorPanel').classList.add('hidden');
+            document.getElementById('logoutBtn').style.display = 'none';
+            document.getElementById('userInfo').textContent = '';
+            showOperatorLogin();
+        }
+
+        // Создание оператора
+        async function createOperator() {
+            showProgress('Создание оператора', 'Создание пользователя Windows и инициализация SDK...');
+            
+            try {
+                const response = await fetch('/api/create_operator', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                updateProgress(100, data.success ? 'Оператор создан успешно!' : 'Ошибка создания оператора');
+                
+                if (data.success) {
+                    appendProgressLog(`✅ Оператор создан: ${data.operator.username}`);
+                    appendProgressLog(`🔑 Пароль: ${data.operator.password}`);
+                    setTimeout(() => {
+                        closeProgressModal();
+                        loadOperators();
+                    }, 2000);
+                } else {
+                    appendProgressLog(`❌ Ошибка: ${data.error}`);
+                    showProgressCloseButton();
+                }
+            } catch (error) {
+                updateProgress(0, 'Ошибка подключения');
+                appendProgressLog(`❌ Ошибка: ${error.message}`);
+                showProgressCloseButton();
+            }
+        }
+
+        // Загрузка списка операторов
+        async function loadOperators() {
+            try {
+                const response = await fetch('/api/operators', {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    displayOperators(data.operators);
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки операторов:', error);
+            }
+        }
+
+        // Отображение операторов
+        function displayOperators(operators) {
+            const container = document.getElementById('operatorsList');
+            if (operators.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">Операторы не найдены. Создайте первого оператора.</div>';
+                return;
+            }
+
+            container.innerHTML = operators.map(operator => `
+                <div class="card operator-card mb-3">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h5 class="card-title">
+                                    <i class="fas fa-user me-2"></i>${operator.username}
+                                    <span class="badge bg-success status-badge ms-2">${operator.status}</span>
+                                </h5>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        <i class="fas fa-calendar me-1"></i>Создан: ${new Date(operator.created_at).toLocaleString()}
+                                        <br>
+                                        <i class="fas fa-mobile-alt me-1"></i>Эмуляторов: ${operator.emulator_count}
+                                    </small>
+                                </p>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <div class="mb-2">
+                                    <strong>Пароль:</strong> <code>${operator.password}</code>
+                                </div>
+                                <button class="btn btn-info btn-sm" onclick="loginAsOperator('${operator.username}', '${operator.password}')">
+                                    <i class="fas fa-sign-in-alt me-1"></i>Войти как оператор
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Вход как оператор
+        function loginAsOperator(username, password) {
+            document.getElementById('operatorUsername').value = username;
+            document.getElementById('operatorPassword').value = password;
+            showOperatorLogin();
+        }
+
+        // Создание эмулятора
+        function createEmulator() {
+            createEmulatorModal.show();
+        }
+
+        // Отправка формы создания эмулятора
+        async function submitCreateEmulator() {
+            const name = document.getElementById('emulatorName').value;
+            const device = document.getElementById('deviceType').value;
+            const apiLevel = document.getElementById('apiLevel').value;
+
+            createEmulatorModal.hide();
+            showProgress('Создание эмулятора', 'Создание AVD, batch файла, EXE и настройка RemoteApp...');
+
+            try {
+                const response = await fetch('/api/create_emulator', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name, device, api_level: apiLevel })
+                });
+
+                const data = await response.json();
+                updateProgress(100, data.success ? 'Эмулятор создан успешно!' : 'Ошибка создания эмулятора');
+                
+                if (data.success) {
+                    appendProgressLog(`✅ Эмулятор создан: ${data.emulator.name}`);
+                    appendProgressLog(`📱 Устройство: ${data.emulator.device}`);
+                    appendProgressLog(`🎯 API Level: ${data.emulator.api_level}`);
+                    setTimeout(() => {
+                        closeProgressModal();
+                        loadOperatorEmulators();
+                    }, 2000);
+                } else {
+                    appendProgressLog(`❌ Ошибка: ${data.error}`);
+                    showProgressCloseButton();
+                }
+            } catch (error) {
+                updateProgress(0, 'Ошибка подключения');
+                appendProgressLog(`❌ Ошибка: ${error.message}`);
+                showProgressCloseButton();
+            }
+        }
+
+        // Загрузка эмуляторов оператора
+        async function loadOperatorEmulators() {
+            try {
+                const response = await fetch('/api/operator_emulators', {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    displayEmulators(data.emulators);
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки эмуляторов:', error);
+            }
+        }
+
+        // Отображение эмуляторов
+        function displayEmulators(emulators) {
+            const container = document.getElementById('emulatorsList');
+            if (emulators.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">Эмуляторы не найдены. Создайте первый эмулятор.</div>';
+                return;
+            }
+
+            container.innerHTML = emulators.map(emulator => `
+                <div class="card emulator-card mb-3">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h5 class="card-title">
+                                    <i class="fas fa-mobile-alt me-2"></i>${emulator.name}
+                                    <span class="badge bg-success status-badge ms-2">${emulator.status}</span>
+                                </h5>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        <i class="fas fa-microchip me-1"></i>Устройство: ${emulator.device}
+                                        <br>
+                                        <i class="fas fa-code me-1"></i>API Level: ${emulator.api_level}
+                                        <br>
+                                        <i class="fas fa-calendar me-1"></i>Создан: ${new Date(emulator.created_at).toLocaleString()}
+                                    </small>
+                                </p>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <button class="btn btn-primary btn-sm mb-2" onclick="downloadRDP('${emulator.id}', '${emulator.name}')">
+                                    <i class="fas fa-download me-1"></i>Скачать RDP
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Скачивание RDP файла
+        async function downloadRDP(emulatorId, emulatorName) {
+            try {
+                const response = await fetch(`/api/download_rdp/${emulatorId}`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${emulatorName}.rdp`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } else {
+                    const data = await response.json();
+                    alert('Ошибка скачивания: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка скачивания: ' + error.message);
+            }
+        }
+
+        // Функции прогресса
+        function showProgress(title, message) {
+            document.getElementById('progressTitle').textContent = title;
+            document.getElementById('progressLog').innerHTML = message;
+            document.getElementById('progressBar').style.width = '10%';
+            document.getElementById('progressCloseBtn').style.display = 'none';
+            progressModal.show();
+        }
+
+        function updateProgress(percent, message) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            if (message) {
+                appendProgressLog(message);
+            }
+        }
+
+        function appendProgressLog(message) {
+            const log = document.getElementById('progressLog');
+            log.innerHTML += '<br>' + message;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function showProgressCloseButton() {
+            document.getElementById('progressCloseBtn').style.display = 'block';
+        }
+
+        function closeProgressModal() {
+            progressModal.hide();
+        }
+
+        // Показываем форму входа оператора по умолчанию
+        if (!currentToken) {
+            showOperatorLogin();
+        }
     </script>
-</body>
-</html>
+  </body>
+  </html>

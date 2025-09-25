@@ -53,6 +53,19 @@ if ($RDPGroup) {
     Write-Host "Не удалось найти группу Remote Desktop Users" -ForegroundColor Red
 }
 
+# Назначаем права доступа для совместимости с RemoteApp
+try {
+    $UserProfilePath = "C:\\Users\\$Username"
+    if (Test-Path $UserProfilePath) {
+        Write-Host "🔐 Настройка прав доступа на профиль пользователя: $UserProfilePath" -ForegroundColor Yellow
+        icacls $UserProfilePath /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+        icacls $UserProfilePath /grant "Users:(OI)(CI)F" /T /Q | Out-Null
+        Write-Host "✅ Права доступа на профиль назначены (Everyone, Users)" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "⚠️  Не удалось назначить права на профиль: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # Результат
 Write-Host "SUCCESS: Пользователь $Username создан успешно" -ForegroundColor Green
 Write-Host "USERNAME: $Username" -ForegroundColor Cyan
@@ -126,8 +139,10 @@ try {
     
     # 4. Настройка прав доступа
     Write-Host "🔐 Настройка прав доступа..." -ForegroundColor Cyan
-    icacls $AndroidUserDir /grant "$Username:(OI)(CI)F" /T | Out-Null
-    Write-Log "Права доступа настроены для $Username на $AndroidUserDir"
+    icacls $AndroidUserDir /grant "$($Username):(OI)(CI)F" /T | Out-Null
+    icacls $AndroidUserDir /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+    icacls $AndroidUserDir /grant "Users:(OI)(CI)F" /T /Q | Out-Null
+    Write-Log "Права доступа настроены для $Username (и Everyone/Users) на $AndroidUserDir"
     
     # 5. Настройка переменных окружения для пользователя
     Write-Host "🌍 Настройка переменных окружения..." -ForegroundColor Cyan
@@ -291,8 +306,9 @@ $UserNum = $LastValidUser.Replace('User', '')
 $AvdName = "User$UserNum`_Emulator"
 Write-Host "Создание AVD с уникальным именем: $AvdName" -ForegroundColor Cyan
 
-# Устанавливаем ANDROID_AVD_HOME для текущего пользователя
-$env:ANDROID_AVD_HOME = "$env:USERPROFILE\\.android\\avd"
+# Устанавливаем ANDROID_AVD_HOME для конкретного пользователя
+$UserProfilePath = "C:\\Users\\$LastValidUser"
+$env:ANDROID_AVD_HOME = "$UserProfilePath\\.android\\avd"
 
 $AvdManagerPath = "$AndroidHome\\cmdline-tools\\latest\\bin\\avdmanager.bat"
 
@@ -308,7 +324,7 @@ if (!(Test-Path $AvdManagerPath)) {
 
 try {
     # Создаем .android директорию если не существует
-    $AndroidDir = "$env:USERPROFILE\\.android\\avd"
+    $AndroidDir = "$UserProfilePath\\.android\\avd"
     if (!(Test-Path $AndroidDir)) {
         New-Item -ItemType Directory -Path $AndroidDir -Force
         Write-Host "Создана директория: $AndroidDir" -ForegroundColor Gray
@@ -327,7 +343,7 @@ try {
     
     # Создаем AVD через avdmanager с правильными параметрами устройства
     Write-Host "Создание AVD через avdmanager..." -ForegroundColor Gray
-    $CreateAvdCmd = "`"$AvdManagerPath`" create avd -n `"$AvdName`" -k `"system-images;android-36;google_apis_playstore;x86_64`" -d `"pixel_6`" -c `"512M`" --force"
+    $CreateAvdCmd = "`"$AvdManagerPath`" create avd -n `"$AvdName`" -k `"system-images;android-36;google_apis_playstore;x86_64`" -d `"small_phone`" -c `"512M`" --force"
     Write-Host "Команда: $CreateAvdCmd" -ForegroundColor Gray
     $result = cmd.exe /c $CreateAvdCmd
     
@@ -426,12 +442,14 @@ REM Устанавливаем переменные окружения Android S
 set ANDROID_HOME=C:\\Program Files\\Android
 set ANDROID_SDK_ROOT=C:\\Program Files\\Android
 set JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.16.8-hotspot
+set ANDROID_AVD_HOME=C:\\Users\\$TestUser\\.android\\avd
 set PATH=%JAVA_HOME%\\bin;%ANDROID_HOME%\\platform-tools;%ANDROID_HOME%\\emulator;%ANDROID_HOME%\\cmdline-tools\\latest\\bin;%PATH%
 
 echo Переменные окружения:
 echo ANDROID_HOME=%ANDROID_HOME%
 echo ANDROID_SDK_ROOT=%ANDROID_SDK_ROOT%
 echo JAVA_HOME=%JAVA_HOME%
+echo ANDROID_AVD_HOME=%ANDROID_AVD_HOME%
 echo.
 
 echo Пользователь: $TestUser
@@ -475,18 +493,27 @@ try {
     ''',
     
     'convert_to_exe': '''
-# Шаг 4: Конвертация batch файла в EXE
-$BatchFilePath = "C:\\Scripts\\test_emulator.bat"
-$ExeFilePath = "C:\\Scripts\\test_emulator.exe"
-$BatToExeConverter = "C:\\Program Files\\BatToExe\\BatToExeConverter.exe"
+# Шаг 4: Создание EXE файла через C# компиляцию
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
+    }
+} while ($UserExists)
 
-Write-Host "🔄 Конвертация batch файла в EXE..." -ForegroundColor Yellow
+# Используем последнего созданного пользователя
+$TestUser = $LastValidUser
+$BatchFilePath = "C:\\Scripts\\$TestUser`_emulator.bat"
+$ExeFilePath = "C:\\Scripts\\$TestUser`AndroidEmulator.exe"
 
-if (!(Test-Path $BatToExeConverter)) {
-    Write-Host "❌ ERROR: Bat To Exe Converter не найден: $BatToExeConverter" -ForegroundColor Red
-    Write-Host "Скачайте и установите Bat To Exe Converter" -ForegroundColor Yellow
-    exit 1
-}
+Write-Host "🔄 Создание EXE файла через C# компиляцию..." -ForegroundColor Yellow
+Write-Host "Пользователь: $TestUser" -ForegroundColor Cyan
+Write-Host "Batch файл: $BatchFilePath" -ForegroundColor Gray
+Write-Host "EXE файл: $ExeFilePath" -ForegroundColor Gray
 
 if (!(Test-Path $BatchFilePath)) {
     Write-Host "❌ ERROR: Batch файл не найден: $BatchFilePath" -ForegroundColor Red
@@ -495,35 +522,107 @@ if (!(Test-Path $BatchFilePath)) {
 }
 
 try {
-    Write-Host "Исходный файл: $BatchFilePath" -ForegroundColor Gray
-    Write-Host "Целевой файл: $ExeFilePath" -ForegroundColor Gray
+    # C# код для EXE файла
+    $CSharpCode = @"
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Security.Principal;
+
+public class AndroidEmulatorLauncher
+{
+    public static void Main()
+    {
+        try
+        {
+            Console.WriteLine("=== $TestUser Android Emulator ===");
+            Console.WriteLine("Текущий пользователь: " + WindowsIdentity.GetCurrent().Name);
+            Console.WriteLine();
+
+            string batchFile = @"$BatchFilePath";
+
+            if (!File.Exists(batchFile))
+            {
+                Console.WriteLine("ОШИБКА: Batch файл не найден: " + batchFile);
+                Console.ReadKey();
+                return;
+            }
+
+            Console.WriteLine("Запуск Android эмулятора $TestUser...");
+            Console.WriteLine("Batch файл: " + batchFile);
+            Console.WriteLine();
+
+            ProcessStartInfo psi = new ProcessStartInfo();
+            psi.FileName = batchFile;
+            psi.UseShellExecute = true;
+            psi.WindowStyle = ProcessWindowStyle.Normal;
+            psi.WorkingDirectory = @"C:\\Scripts";
+            psi.Verb = "runas"; // Запуск с правами администратора
+
+            Process process = Process.Start(psi);
+            if (process != null)
+            {
+                Console.WriteLine("Эмулятор запущен. Ожидание завершения...");
+                process.WaitForExit();
+                Console.WriteLine("Эмулятор завершил работу с кодом: " + process.ExitCode);
+            }
+            else
+            {
+                Console.WriteLine("ОШИБКА: Не удалось запустить процесс");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ОШИБКА запуска эмулятора: " + ex.Message);
+            Console.WriteLine("Детали: " + ex.StackTrace);
+            Console.WriteLine();
+            Console.WriteLine("Нажмите любую клавишу для выхода...");
+            Console.ReadKey();
+        }
+    }
+}
+"@
+
+    # Компилируем C# код в EXE
+    Write-Host "Компиляция C# кода в EXE..." -ForegroundColor Gray
     
-    $ConvertCmd = "\\"$BatToExeConverter\\" /bat \\"$BatchFilePath\\" /exe \\"$ExeFilePath\\" /invisible /overwrite"
-    Write-Host "Команда конвертации: $ConvertCmd" -ForegroundColor Gray
+    Add-Type -TypeDefinition $CSharpCode -OutputAssembly $ExeFilePath -OutputType ConsoleApplication
     
-    $Result = Start-Process -FilePath "cmd.exe" -ArgumentList "/c $ConvertCmd" -Wait -PassThru -WindowStyle Hidden
-    
-    if ($Result.ExitCode -eq 0 -and (Test-Path $ExeFilePath)) {
-        Write-Host "✅ SUCCESS: Файл успешно конвертирован в EXE: $ExeFilePath" -ForegroundColor Green
+    if (Test-Path $ExeFilePath) {
+        Write-Host "✅ SUCCESS: EXE файл создан через C# компиляцию: $ExeFilePath" -ForegroundColor Green
         Write-Host "EXE_FILE: $ExeFilePath" -ForegroundColor Cyan
         
         # Проверяем размер EXE файла
         $ExeInfo = Get-Item $ExeFilePath
         Write-Host "Размер EXE файла: $($ExeInfo.Length) байт" -ForegroundColor Gray
+        Write-Host "Пользователь: $TestUser" -ForegroundColor Cyan
     } else {
-        Write-Host "❌ ERROR: Конвертация не удалась. Код выхода: $($Result.ExitCode)" -ForegroundColor Red
+        Write-Host "❌ ERROR: EXE файл не был создан" -ForegroundColor Red
         exit 1
     }
 } catch {
-    Write-Host "❌ ERROR: Ошибка конвертации: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "❌ ERROR: Ошибка создания EXE: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
     ''',
     
     'configure_remoteapp': '''
 # Шаг 5: Настройка RemoteApp в реестре Windows
-$AppName = "TestAndroidEmulator"
-$ExePath = "C:\\Scripts\\test_emulator.exe"
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
+    }
+} while ($UserExists)
+
+# Используем последнего созданного пользователя
+$TestUser = $LastValidUser
+$AppName = "$TestUser`AndroidEmulator"
+$ExePath = "C:\\Scripts\\$TestUser`AndroidEmulator.exe"
 $RemoteAppPath = "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Terminal Server\\TSAppAllowList\\Applications"
 
 Write-Host "🔄 Настройка RemoteApp в реестре..." -ForegroundColor Yellow
@@ -576,10 +675,23 @@ try {
     
     'create_rdp': '''
 # Шаг 6: Создание RDP файла для подключения
-$Username = "TestUser"
-$AppName = "TestAndroidEmulator"
-$RdpFilePath = "C:\\Scripts\\test_emulator.rdp"
-$ServerAddress = "192.168.88.237"  # Замените на ваш IP адрес
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
+    }
+} while ($UserExists)
+
+# Используем последнего созданного пользователя
+$TestUser = $LastValidUser
+$Username = $TestUser
+$AppName = "$TestUser`AndroidEmulator"
+$RdpFilePath = "C:\\Scripts\\$TestUser`_emulator.rdp"
+$ServerAddress = $env:COMPUTERNAME  # Используем имя компьютера
 
 Write-Host "🔄 Создание RDP файла..." -ForegroundColor Yellow
 

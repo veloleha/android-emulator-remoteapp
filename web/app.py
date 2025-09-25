@@ -48,9 +48,10 @@ logging.basicConfig(
     ]
 )
 
-# Хранилище сессий и телефонов в памяти (в продакшене использовать базу данных)
+# Хранилище сессий, операторов и телефонов в памяти (в продакшене использовать базу данных)
 sessions = {}
-phones_db = {}
+operators_db = {}  # Хранилище операторов (пользователей Windows)
+phones_db = {}     # Хранилище телефонов (эмуляторов)
 
 def write_log(message, level='INFO'):
     """Функция для записи логов"""
@@ -100,6 +101,7 @@ def execute_powershell_step(step_name, script_content, user_context=None):
                 'success': False,
                 'output': msg,
                 'step': step_name,
+                'needs_admin': True,
                 'timestamp': datetime.now().isoformat()
             }
         
@@ -140,11 +142,12 @@ def execute_powershell_step(step_name, script_content, user_context=None):
         # Use -NoProfile, enable Information stream, and merge all streams to stdout so Write-Host is captured
         # PowerShell stream redirection: *>&1 merges all streams (success, error, warning, verbose, debug, information) into stdout
         cmd = (
-            f'powershell.exe -NoProfile -ExecutionPolicy Bypass '
-            f'-File "{temp_script}" -InformationAction Continue *>&1 | Out-String'
+            f'powershell.exe -NoProfile -NonInteractive -NoLogo -ExecutionPolicy Bypass '
+            f'-File "{temp_script}" -InformationAction Continue'
         )
         write_log(f"Запуск PowerShell: temp_script={temp_script}, transcript={transcript_path}")
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=300)
+        # Увеличиваем таймаут до 900 секунд, т.к. установка SDK может занять время
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=900)
         
         # Не удаляем временный файл сразу — полезно для отладки. Оставим копию.
         try:
@@ -162,19 +165,21 @@ def execute_powershell_step(step_name, script_content, user_context=None):
         stderr_text = result.stderr if result.stderr is not None else ''
         output = stdout_text + stderr_text
 
-        # Если прямой вывод пуст, пробуем прочитать транскрипт
-        if not output.strip():
-            try:
-                if os.path.exists(transcript_path):
-                    try:
-                        sz = os.path.getsize(transcript_path)
-                        write_log(f"Обнаружен транскрипт: {transcript_path} ({sz} bytes)")
-                    except Exception:
-                        pass
-                    with open(transcript_path, 'r', encoding='utf-8', errors='ignore') as tf:
-                        output = tf.read()
-            except Exception:
-                pass
+        # Всегда добавляем содержимое транскрипта к выводу для надежного парсинга
+        try:
+            if os.path.exists(transcript_path):
+                try:
+                    sz = os.path.getsize(transcript_path)
+                    write_log(f"Обнаружен транскрипт: {transcript_path} ({sz} bytes)")
+                except Exception:
+                    pass
+                with open(transcript_path, 'r', encoding='utf-8', errors='ignore') as tf:
+                    transcript_text = tf.read()
+                    # Избегаем дублирования
+                    if transcript_text and transcript_text not in output:
+                        output = (output or '') + "\n" + transcript_text
+        except Exception:
+            pass
 
         # Диагностика: записываем полный вывод шага в файл для отладки
         try:
@@ -392,6 +397,20 @@ def api_get_steps_info():
         'steps': STEP_DESCRIPTIONS
     })
 
+# Состояние прав администратора процесса Flask
+@app.route('/api/admin_status', methods=['GET'])
+def api_admin_status():
+    try:
+        is_admin = False
+        try:
+            is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            is_admin = False
+        return jsonify({'success': True, 'is_admin': is_admin})
+    except Exception as e:
+        write_log(f"Ошибка в admin_status: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/download_rdp/<phone_id>', methods=['GET'])
 def api_download_rdp(phone_id):
     """Скачивание RDP файла для конкретного телефона"""
@@ -411,60 +430,316 @@ def api_download_rdp(phone_id):
     write_log(f"Скачивание RDP файла для телефона {phone_id}: {os.path.basename(rdp_file)}")
     return send_file(rdp_file, as_attachment=True, download_name=f"{phone['name']}.rdp")
 
-def parse_step_output(output, step_name):
-    """Парсинг вывода шага для извлечения полезной информации"""
-    result = {}
+# === API для управления операторами ===
+
+@app.route('/api/operators', methods=['GET'])
+def api_get_operators():
+    """Получение списка всех операторов"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
     
-    if 'SUCCESS:' in output or '✅ SUCCESS:' in output:
-        result['success'] = True
-        
-        # Извлекаем специфичную для шага информацию
-        if step_name == 'create_user':
-            username_match = re.search(r'USERNAME: (.+)', output)
-            password_match = re.search(r'PASSWORD: (.+)', output)
-            if username_match and password_match:
-                result['username'] = username_match.group(1).strip()
-                result['password'] = password_match.group(1).strip()
-        
-        elif step_name == 'create_avd':
-            avd_match = re.search(r'AVD_NAME: (.+)', output)
-            if avd_match:
-                result['avd_name'] = avd_match.group(1).strip()
-        
-        elif step_name == 'create_batch':
-            batch_match = re.search(r'BATCH_FILE: (.+)', output)
-            if batch_match:
-                result['batch_file'] = batch_match.group(1).strip()
-        
-        elif step_name == 'convert_to_exe':
-            exe_match = re.search(r'EXE_FILE: (.+)', output)
-            if exe_match:
-                result['exe_file'] = exe_match.group(1).strip()
-        
-        elif step_name == 'configure_remoteapp':
-            app_match = re.search(r'APP_NAME: (.+)', output)
-            path_match = re.search(r'APP_PATH: (.+)', output)
-            if app_match and path_match:
-                result['app_name'] = app_match.group(1).strip()
-                result['app_path'] = path_match.group(1).strip()
-        
-        elif step_name == 'create_rdp':
-            rdp_match = re.search(r'RDP_FILE: (.+)', output)
-            if rdp_match:
-                result['rdp_file'] = rdp_match.group(1).strip()
-        
-        elif step_name == 'test_microphone':
-            mic_match = re.search(r'MICROPHONE_STATUS: (.+)', output)
-            if mic_match:
-                result['microphone_status'] = mic_match.group(1).strip()
+    operators_list = []
+    for op_id, operator in operators_db.items():
+        # Подсчитываем количество эмуляторов для каждого оператора
+        emulator_count = len([p for p in phones_db.values() if p.get('operator_id') == op_id])
+        operators_list.append({
+            'id': op_id,
+            'username': operator['username'],
+            'password': operator['password'],
+            'status': operator['status'],
+            'created_at': operator['created_at'],
+            'emulator_count': emulator_count
+        })
     
+    return jsonify({
+        'success': True,
+        'operators': operators_list
+    })
+
+@app.route('/api/create_operator', methods=['POST'])
+def api_create_operator():
+    """Создание нового оператора (пользователя Windows + SDK)"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    write_log("Запуск создания нового оператора...")
+    
+    try:
+        # Импортируем скрипты шагов
+        from step_scripts import STEP_SCRIPTS
+        
+        # Выполняем создание пользователя
+        result = execute_powershell_step('create_user', STEP_SCRIPTS['create_user'])
+        
+        if result['success']:
+            # Парсим результат для получения данных пользователя
+            parsed_result = parse_step_output(result['output'], 'create_user')
+            
+            if 'username' in parsed_result and 'password' in parsed_result:
+                # Создаем запись оператора
+                operator_id = str(uuid.uuid4())
+                new_operator = {
+                    'id': operator_id,
+                    'username': parsed_result['username'],
+                    'password': parsed_result['password'],
+                    'status': 'active',
+                    'created_at': datetime.now().isoformat(),
+                    'sdk_initialized': True
+                }
+                
+                operators_db[operator_id] = new_operator
+                
+                write_log(f"Оператор создан успешно: {parsed_result['username']}")
+                return jsonify({
+                    'success': True,
+                    'operator': new_operator,
+                    'setup_output': result['output']
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Не удалось получить данные созданного пользователя',
+                    'output': result['output']
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Ошибка создания пользователя',
+                'output': result['output']
+            }), 500
+    
+    except Exception as e:
+        error_msg = f"Исключение при создании оператора: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
+@app.route('/api/operator_login', methods=['POST'])
+def api_operator_login():
+    """Вход в систему под оператором"""
+    data = request.get_json()
+    username = data.get('username', '')
+    password = data.get('password', '')
+    
+    # Ищем оператора по имени пользователя
+    operator = None
+    operator_id = None
+    for op_id, op_data in operators_db.items():
+        if op_data['username'] == username and op_data['password'] == password:
+            operator = op_data
+            operator_id = op_id
+            break
+    
+    if operator:
+        # Создаем токен сессии для оператора
+        token = str(uuid.uuid4())
+        sessions[token] = {
+            'authenticated': True,
+            'user_type': 'operator',
+            'operator_id': operator_id,
+            'user': {
+                'id': operator_id,
+                'username': operator['username'],
+                'type': 'operator'
+            },
+            'created_at': datetime.now()
+        }
+        
+        write_log(f"Успешный вход оператора {username} с IP: {request.remote_addr}")
+        return jsonify({
+            'success': True,
+            'token': token,
+            'operator': operator
+        })
     else:
-        result['success'] = False
-        if 'ERROR:' in output or '❌ ERROR:' in output:
-            error_match = re.search(r'(?:❌ )?ERROR: (.+)', output)
-            if error_match:
-                result['error'] = error_match.group(1).strip()
+        write_log(f"Неудачная попытка входа оператора с IP: {request.remote_addr}, имя: {username}", 'WARNING')
+        return jsonify({
+            'success': False,
+            'error': 'Неверные учетные данные оператора'
+        }), 401
+
+@app.route('/api/operator_emulators', methods=['GET'])
+def api_get_operator_emulators():
+    """Получение списка эмуляторов конкретного оператора"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
     
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'operator':
+        return jsonify({'error': 'Доступ только для операторов'}), 403
+    
+    operator_id = session_data.get('operator_id')
+    operator_emulators = [phone for phone in phones_db.values() if phone.get('operator_id') == operator_id]
+    
+    return jsonify({
+        'success': True,
+        'emulators': operator_emulators
+    })
+
+@app.route('/api/create_emulator', methods=['POST'])
+def api_create_emulator():
+    """Создание нового эмулятора для оператора"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'operator':
+        return jsonify({'error': 'Доступ только для операторов'}), 403
+    
+    data = request.get_json()
+    emulator_data = {
+        'name': data.get('name', 'Android Emulator'),
+        'device': data.get('device', 'small_phone'),
+        'api_level': data.get('api_level', 'android-36')
+    }
+    
+    operator_id = session_data.get('operator_id')
+    operator = operators_db.get(operator_id)
+    
+    if not operator:
+        return jsonify({'error': 'Оператор не найден'}), 404
+    
+    write_log(f"Создание эмулятора для оператора {operator['username']}: {emulator_data}")
+    
+    try:
+        # Импортируем скрипты шагов
+        from step_scripts import STEP_SCRIPTS
+        
+        # Контекст для подстановки в скрипты
+        user_context = {
+            'username': operator['username'],
+            'emulator_name': emulator_data['name'],
+            'device_type': emulator_data['device']
+        }
+        
+        # Выполняем полную цепочку создания эмулятора
+        steps = ['create_avd', 'create_batch', 'convert_to_exe', 'configure_remoteapp', 'create_rdp']
+        results = {}
+        
+        for step in steps:
+            write_log(f"Выполнение шага: {step}")
+            result = execute_powershell_step(step, STEP_SCRIPTS[step], user_context)
+            results[step] = result
+            
+            if not result['success']:
+                write_log(f"Ошибка на шаге {step}: {result.get('output', 'Неизвестная ошибка')}", 'ERROR')
+                return jsonify({
+                    'success': False,
+                    'error': f'Ошибка на шаге {step}',
+                    'step_results': results
+                }), 500
+        
+        # Парсим результаты для получения путей к файлам
+        parsed_results = {}
+        for step, result in results.items():
+            parsed_results[step] = parse_step_output(result['output'], step)
+        
+        # Создаем запись эмулятора
+        emulator_id = str(uuid.uuid4())
+        new_emulator = {
+            'id': emulator_id,
+            'name': emulator_data['name'],
+            'device': emulator_data['device'],
+            'api_level': emulator_data['api_level'],
+            'status': 'active',
+            'created_at': datetime.now().isoformat(),
+            'operator_id': operator_id,
+            'operator_username': operator['username'],
+            'avd_name': parsed_results.get('create_avd', {}).get('avd_name', ''),
+            'batch_file': parsed_results.get('create_batch', {}).get('batch_file', ''),
+            'exe_file': parsed_results.get('convert_to_exe', {}).get('exe_file', ''),
+            'rdp_file': parsed_results.get('create_rdp', {}).get('rdp_file', ''),
+            'app_name': parsed_results.get('configure_remoteapp', {}).get('app_name', '')
+        }
+        
+        phones_db[emulator_id] = new_emulator
+        
+        write_log(f"Эмулятор создан успешно: {emulator_id}")
+        return jsonify({
+            'success': True,
+            'emulator': new_emulator,
+            'step_results': results
+        })
+    
+    except Exception as e:
+        error_msg = f"Исключение при создании эмулятора: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
+def parse_step_output(output, step_name):
+    """Парсинг вывода шага для извлечения полезной информации."""
+    result = {}
+
+    # Определяем успех по наличию SUCCESS: в выводе
+    has_success = ('SUCCESS:' in output) or ('✅ SUCCESS:' in output)
+    has_error = ('ERROR:' in output) or ('❌ ERROR:' in output)
+    
+    # Приоритет SUCCESS над ERROR (т.к. могут быть предупреждения)
+    if has_success:
+        result['success'] = True
+    elif has_error:
+        result['success'] = False
+    else:
+        # Если нет явных маркеров, считаем успехом
+        result['success'] = True
+
+    # Общий парсинг ошибок
+    if has_error:
+        error_match = re.search(r'(?:❌ )?ERROR: (.+)', output)
+        if error_match:
+            result['error'] = error_match.group(1).strip()
+
+    # Специфичные поля
+    if step_name == 'create_user':
+        username_match = re.search(r'USERNAME: (.+)', output)
+        password_match = re.search(r'PASSWORD: (.+)', output)
+        if username_match:
+            result['username'] = username_match.group(1).strip()
+        if password_match:
+            result['password'] = password_match.group(1).strip()
+
+    elif step_name == 'create_avd':
+        avd_match = re.search(r'AVD_NAME: (.+)', output)
+        if avd_match:
+            result['avd_name'] = avd_match.group(1).strip()
+
+    elif step_name == 'create_batch':
+        batch_match = re.search(r'BATCH_FILE: (.+)', output)
+        if batch_match:
+            result['batch_file'] = batch_match.group(1).strip()
+
+    elif step_name == 'convert_to_exe':
+        exe_match = re.search(r'EXE_FILE: (.+)', output)
+        if exe_match:
+            result['exe_file'] = exe_match.group(1).strip()
+
+    elif step_name == 'configure_remoteapp':
+        app_match = re.search(r'APP_NAME: (.+)', output)
+        path_match = re.search(r'APP_PATH: (.+)', output)
+        if app_match:
+            result['app_name'] = app_match.group(1).strip()
+        if path_match:
+            result['app_path'] = path_match.group(1).strip()
+
+    elif step_name == 'create_rdp':
+        rdp_match = re.search(r'RDP_FILE: (.+)', output)
+        if rdp_match:
+            result['rdp_file'] = rdp_match.group(1).strip()
+
+    elif step_name == 'test_microphone':
+        mic_match = re.search(r'MICROPHONE_STATUS: (.+)', output)
+        if mic_match:
+            result['microphone_status'] = mic_match.group(1).strip()
+
     return result
 
 def parse_full_setup_output(output):
@@ -511,13 +786,19 @@ if __name__ == '__main__':
     print("Android Emulator RemoteApp API запущен!")
     print("")
     print("Доступные эндпоинты:")
-    print("  POST /api/login - Вход в систему")
+    print("  === Администратор ===")
+    print("  POST /api/login - Вход администратора")
     print("  POST /api/logout - Выход из системы")
-    print("  GET  /api/phones - Получение списка телефонов")
-    print("  POST /api/create_phone - Создание нового телефона")
+    print("  GET  /api/operators - Список всех операторов")
+    print("  POST /api/create_operator - Создание нового оператора")
+    print("  === Операторы ===")
+    print("  POST /api/operator_login - Вход оператора")
+    print("  GET  /api/operator_emulators - Эмуляторы оператора")
+    print("  POST /api/create_emulator - Создание эмулятора")
+    print("  GET  /api/download_rdp/<id> - Скачивание RDP файла")
+    print("  === Тестирование ===")
     print("  POST /api/test_step - Пошаговое тестирование")
     print("  GET  /api/steps_info - Информация о шагах")
-    print("  GET  /api/download_rdp/<id> - Скачивание RDP файла")
     print("")
     print("Веб-интерфейс: http://localhost:5000")
     print("API Base URL: http://localhost:5000/api")
