@@ -710,7 +710,9 @@ $TestUser = $LastValidUser
 $Username = $TestUser
 $AppName = "$TestUser`AndroidEmulator"
 $RdpFilePath = "C:\\Scripts\\$TestUser`_emulator.rdp"
-$ServerAddress = $env:COMPUTERNAME  # Используем имя компьютера
+# Используем IP адрес из настроек (по умолчанию имя компьютера)
+$ServerAddress = if ($env:RDP_IP) { $env:RDP_IP } else { $env:COMPUTERNAME }
+$OperatorPassword = if ($env:OPERATOR_PASSWORD) { $env:OPERATOR_PASSWORD } else { "UniCo2022" }
 
 Write-Host "🔄 Создание RDP файла..." -ForegroundColor Yellow
 
@@ -721,8 +723,9 @@ remoteapplicationname:s:$AppName
 remoteapplicationprogram:s:||$AppName
 alternate shell:s:rdpinit.exe
 disableremoteappcapscheck:i:1
-prompt for credentials on client:i:1
+prompt for credentials on client:i:0
 username:s:$Username
+password 51:b:$(([System.Text.Encoding]::Unicode.GetBytes($OperatorPassword) | ForEach-Object { $_.ToString("X2") }) -join '')
 audiomode:i:2
 audioqualitymode:i:2
 audiocapturemode:i:1

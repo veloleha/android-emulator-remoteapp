@@ -21,6 +21,8 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
+import sqlite3
+import threading
 
 # Конфигурация приложения
 app = Flask(__name__)
@@ -30,9 +32,12 @@ CORS(app)  # Разрешаем CORS для React фронтенда
 # Настройки
 ADMIN_USERNAME = 'admin'
 ADMIN_PASSWORD_HASH = generate_password_hash('admin123')  # Измените пароль!
+OPERATOR_PASSWORD = 'UniCo2022'  # Единый пароль для всех операторов
 POWERSHELL_SCRIPT_PATH = r'C:\emulator\AndroidEmulatorSetup.ps1'
 LOG_FILE = r'C:\Scripts\web_log.txt'
 DOWNLOAD_DIR = r'C:\Scripts\downloads'
+DATABASE_PATH = r'C:\Scripts\emulator_manager.db'
+DEFAULT_RDP_IP = '127.0.0.1'  # IP по умолчанию для RemoteApp
 
 # Убедимся, что директории существуют
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -48,10 +53,80 @@ logging.basicConfig(
     ]
 )
 
-# Хранилище сессий, операторов и телефонов в памяти (в продакшене использовать базу данных)
+# Хранилище сессий в памяти (временные данные)
 sessions = {}
-operators_db = {}  # Хранилище операторов (пользователей Windows)
-phones_db = {}     # Хранилище телефонов (эмуляторов)
+
+# Блокировка для потокобезопасности базы данных
+db_lock = threading.Lock()
+
+def init_database():
+    """Инициализация SQLite базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        # Таблица настроек
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        ''')
+        
+        # Таблица операторов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS operators (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Таблица эмуляторов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS emulators (
+                id TEXT PRIMARY KEY,
+                operator_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                device TEXT NOT NULL,
+                api_level TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                rdp_file TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (operator_id) REFERENCES operators (id)
+            )
+        ''')
+        
+        # Устанавливаем IP по умолчанию если не установлен
+        cursor.execute('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', 
+                      ('rdp_ip', DEFAULT_RDP_IP))
+        
+        conn.commit()
+        conn.close()
+
+def get_setting(key, default=None):
+    """Получить настройку из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result else default
+
+def set_setting(key, value):
+    """Установить настройку в базе данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
+        conn.commit()
+        conn.close()
+
+# Инициализация базы данных при запуске
+init_database()
 
 def write_log(message, level='INFO'):
     """Функция для записи логов"""
@@ -61,6 +136,108 @@ def write_log(message, level='INFO'):
         logging.warning(message)
     else:
         logging.info(message)
+
+# Функции для работы с операторами
+def create_operator_db(username, password=OPERATOR_PASSWORD):
+    """Создать оператора в базе данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        operator_id = str(uuid.uuid4())
+        try:
+            cursor.execute('''
+                INSERT INTO operators (id, username, password, status)
+                VALUES (?, ?, ?, 'active')
+            ''', (operator_id, username, password))
+            conn.commit()
+            conn.close()
+            return operator_id
+        except sqlite3.IntegrityError:
+            conn.close()
+            return None  # Пользователь уже существует
+
+def get_operator_db(username):
+    """Получить оператора из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM operators WHERE username = ?', (username,))
+        result = cursor.fetchone()
+        conn.close()
+        if result:
+            return {
+                'id': result[0],
+                'username': result[1],
+                'password': result[2],
+                'status': result[3],
+                'created_at': result[4]
+            }
+        return None
+
+def get_all_operators_db():
+    """Получить всех операторов из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM operators ORDER BY created_at DESC')
+        results = cursor.fetchall()
+        conn.close()
+        operators = []
+        for row in results:
+            operators.append({
+                'id': row[0],
+                'username': row[1],
+                'password': row[2],
+                'status': row[3],
+                'created_at': row[4]
+            })
+        return operators
+
+# Функции для работы с эмуляторами
+def create_emulator_db(operator_id, name, device, api_level, rdp_file=None):
+    """Создать эмулятор в базе данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        emulator_id = str(uuid.uuid4())
+        cursor.execute('''
+            INSERT INTO emulators (id, operator_id, name, device, api_level, rdp_file, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'active')
+        ''', (emulator_id, operator_id, name, device, api_level, rdp_file))
+        conn.commit()
+        conn.close()
+        return emulator_id
+
+def get_operator_emulators_db(operator_id):
+    """Получить эмуляторы оператора из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM emulators WHERE operator_id = ? ORDER BY created_at DESC', (operator_id,))
+        results = cursor.fetchall()
+        conn.close()
+        emulators = []
+        for row in results:
+            emulators.append({
+                'id': row[0],
+                'operator_id': row[1],
+                'name': row[2],
+                'device': row[3],
+                'api_level': row[4],
+                'status': row[5],
+                'rdp_file': row[6],
+                'created_at': row[7]
+            })
+        return emulators
+
+def delete_emulator_db(emulator_id):
+    """Удалить эмулятор из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM emulators WHERE id = ?', (emulator_id,))
+        conn.commit()
+        conn.close()
 
 def is_authenticated(token):
     """Проверка аутентификации по токену"""
@@ -106,9 +283,12 @@ def execute_powershell_step(step_name, script_content, user_context=None):
             }
         
         # Подставляем контекст пользователя в скрипт если нужно
+        env_vars = {}
         if user_context:
             for key, value in user_context.items():
                 script_content = script_content.replace(f"{{{{ {key} }}}}", str(value))
+                # Также устанавливаем переменные окружения для PowerShell
+                env_vars[key.upper()] = str(value)
         
         # Создаем временный скрипт для шага с правильной кодировкой
         temp_script = f"C:\\Scripts\\temp_{step_name.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.ps1"
@@ -146,8 +326,13 @@ def execute_powershell_step(step_name, script_content, user_context=None):
             f'-File "{temp_script}" -InformationAction Continue'
         )
         write_log(f"Запуск PowerShell: temp_script={temp_script}, transcript={transcript_path}")
+        
+        # Подготавливаем окружение с дополнительными переменными
+        env = os.environ.copy()
+        env.update(env_vars)
+        
         # Увеличиваем таймаут до 900 секунд, т.к. установка SDK может занять время
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=900)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=900, env=env)
         
         # Не удаляем временный файл сразу — полезно для отладки. Оставим копию.
         try:
@@ -439,23 +624,58 @@ def api_get_operators():
     if not is_authenticated(token):
         return jsonify({'error': 'Не авторизован'}), 401
     
+    operators = get_all_operators_db()
     operators_list = []
-    for op_id, operator in operators_db.items():
+    for operator in operators:
         # Подсчитываем количество эмуляторов для каждого оператора
-        emulator_count = len([p for p in phones_db.values() if p.get('operator_id') == op_id])
+        emulators = get_operator_emulators_db(operator['id'])
         operators_list.append({
-            'id': op_id,
+            'id': operator['id'],
             'username': operator['username'],
             'password': operator['password'],
             'status': operator['status'],
             'created_at': operator['created_at'],
-            'emulator_count': emulator_count
+            'emulator_count': len(emulators)
         })
     
     return jsonify({
         'success': True,
         'operators': operators_list
     })
+
+@app.route('/api/settings/rdp_ip', methods=['GET', 'POST'])
+def api_rdp_ip_settings():
+    """Настройка IP адреса для RemoteApp"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    if request.method == 'GET':
+        # Получить текущий IP
+        current_ip = get_setting('rdp_ip', DEFAULT_RDP_IP)
+        return jsonify({
+            'success': True,
+            'rdp_ip': current_ip
+        })
+    
+    elif request.method == 'POST':
+        # Установить новый IP
+        data = request.get_json()
+        if not data or 'rdp_ip' not in data:
+            return jsonify({'error': 'IP адрес не указан'}), 400
+        
+        new_ip = data['rdp_ip'].strip()
+        if not new_ip:
+            return jsonify({'error': 'IP адрес не может быть пустым'}), 400
+        
+        set_setting('rdp_ip', new_ip)
+        write_log(f"IP адрес для RemoteApp изменен на: {new_ip}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'IP адрес обновлен',
+            'rdp_ip': new_ip
+        })
 
 @app.route('/api/create_operator', methods=['POST'])
 def api_create_operator():
@@ -477,19 +697,19 @@ def api_create_operator():
             # Парсим результат для получения данных пользователя
             parsed_result = parse_step_output(result['output'], 'create_user')
             
-            if 'username' in parsed_result and 'password' in parsed_result:
-                # Создаем запись оператора
-                operator_id = str(uuid.uuid4())
-                new_operator = {
-                    'id': operator_id,
-                    'username': parsed_result['username'],
-                    'password': parsed_result['password'],
-                    'status': 'active',
-                    'created_at': datetime.now().isoformat(),
-                    'sdk_initialized': True
-                }
+            if 'username' in parsed_result:
+                # Создаем запись оператора в базе данных с единым паролем
+                operator_id = create_operator_db(parsed_result['username'], OPERATOR_PASSWORD)
                 
-                operators_db[operator_id] = new_operator
+                if operator_id:
+                    new_operator = {
+                        'id': operator_id,
+                        'username': parsed_result['username'],
+                        'password': OPERATOR_PASSWORD,  # Единый пароль для всех
+                        'status': 'active',
+                        'created_at': datetime.now().isoformat(),
+                        'sdk_initialized': True
+                    }
                 
                 write_log(f"Оператор создан успешно: {parsed_result['username']}")
                 return jsonify({
@@ -525,24 +745,17 @@ def api_operator_login():
     username = data.get('username', '')
     password = data.get('password', '')
     
-    # Ищем оператора по имени пользователя
-    operator = None
-    operator_id = None
-    for op_id, op_data in operators_db.items():
-        if op_data['username'] == username and op_data['password'] == password:
-            operator = op_data
-            operator_id = op_id
-            break
-    
-    if operator:
+    # Ищем оператора в базе данных
+    operator = get_operator_db(username)
+    if operator and operator['password'] == password:
         # Создаем токен сессии для оператора
         token = str(uuid.uuid4())
         sessions[token] = {
             'authenticated': True,
             'user_type': 'operator',
-            'operator_id': operator_id,
+            'operator_id': operator['id'],
             'user': {
-                'id': operator_id,
+                'id': operator['id'],
                 'username': operator['username'],
                 'type': 'operator'
             },
@@ -574,7 +787,7 @@ def api_get_operator_emulators():
         return jsonify({'error': 'Доступ только для операторов'}), 403
     
     operator_id = session_data.get('operator_id')
-    operator_emulators = [phone for phone in phones_db.values() if phone.get('operator_id') == operator_id]
+    operator_emulators = get_operator_emulators_db(operator_id)
     
     return jsonify({
         'success': True,
@@ -600,7 +813,7 @@ def api_create_emulator():
     }
     
     operator_id = session_data.get('operator_id')
-    operator = operators_db.get(operator_id)
+    operator = get_operator_db(session_data['user']['username'])
     
     if not operator:
         return jsonify({'error': 'Оператор не найден'}), 404
@@ -612,10 +825,13 @@ def api_create_emulator():
         from step_scripts import STEP_SCRIPTS
         
         # Контекст для подстановки в скрипты
+        rdp_ip = get_setting('rdp_ip', DEFAULT_RDP_IP)
         user_context = {
             'username': operator['username'],
             'emulator_name': emulator_data['name'],
-            'device_type': emulator_data['device']
+            'device_type': emulator_data['device'],
+            'rdp_ip': rdp_ip,
+            'operator_password': OPERATOR_PASSWORD
         }
         
         # Выполняем полную цепочку создания эмулятора
@@ -640,8 +856,16 @@ def api_create_emulator():
         for step, result in results.items():
             parsed_results[step] = parse_step_output(result['output'], step)
         
-        # Создаем запись эмулятора
-        emulator_id = str(uuid.uuid4())
+        # Создаем запись эмулятора в базе данных
+        rdp_file = parsed_results.get('create_rdp', {}).get('rdp_file', '')
+        emulator_id = create_emulator_db(
+            operator_id=operator_id,
+            name=emulator_data['name'],
+            device=emulator_data['device'],
+            api_level=emulator_data['api_level'],
+            rdp_file=rdp_file
+        )
+        
         new_emulator = {
             'id': emulator_id,
             'name': emulator_data['name'],
@@ -654,11 +878,9 @@ def api_create_emulator():
             'avd_name': parsed_results.get('create_avd', {}).get('avd_name', ''),
             'batch_file': parsed_results.get('create_batch', {}).get('batch_file', ''),
             'exe_file': parsed_results.get('convert_to_exe', {}).get('exe_file', ''),
-            'rdp_file': parsed_results.get('create_rdp', {}).get('rdp_file', ''),
+            'rdp_file': rdp_file,
             'app_name': parsed_results.get('configure_remoteapp', {}).get('app_name', '')
         }
-        
-        phones_db[emulator_id] = new_emulator
         
         write_log(f"Эмулятор создан успешно: {emulator_id}")
         return jsonify({
@@ -669,6 +891,131 @@ def api_create_emulator():
     
     except Exception as e:
         error_msg = f"Исключение при создании эмулятора: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
+@app.route('/api/delete_emulator/<emulator_id>', methods=['DELETE'])
+def api_delete_emulator(emulator_id):
+    """Удаление эмулятора с очисткой реестра RemoteApp"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'operator':
+        return jsonify({'error': 'Доступ только для операторов'}), 403
+    
+    operator_id = session_data.get('operator_id')
+    
+    # Получаем эмулятор из базы данных
+    emulators = get_operator_emulators_db(operator_id)
+    emulator = next((e for e in emulators if e['id'] == emulator_id), None)
+    
+    if not emulator:
+        return jsonify({'error': 'Эмулятор не найден'}), 404
+    
+    write_log(f"Удаление эмулятора {emulator['name']} (ID: {emulator_id})")
+    
+    try:
+        # Импортируем скрипт удаления
+        from step_scripts import STEP_SCRIPTS
+        
+        # Создаем скрипт удаления эмулятора
+        delete_script = f'''
+# Удаление эмулятора {emulator['name']}
+Write-Host "🗑️ Удаление эмулятора {emulator['name']}..." -ForegroundColor Yellow
+
+# Получаем имя пользователя из имени эмулятора
+$EmulatorName = "{emulator['name']}"
+$Username = $EmulatorName -replace "_.*", ""
+
+Write-Host "Пользователь: $Username" -ForegroundColor Cyan
+
+try {{
+    # 1. Удаляем RemoteApp из реестра
+    $AppName = "$Username`AndroidEmulator"
+    $RemoteAppPath = "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Terminal Server\\TSAppAllowList\\Applications"
+    $AppKeyPath = "$RemoteAppPath\\$AppName"
+    
+    if (Test-Path $AppKeyPath) {{
+        Remove-Item -Path $AppKeyPath -Recurse -Force
+        Write-Host "✅ RemoteApp удален из реестра: $AppName" -ForegroundColor Green
+    }} else {{
+        Write-Host "⚠️ RemoteApp не найден в реестре: $AppName" -ForegroundColor Yellow
+    }}
+    
+    # 2. Удаляем файлы эмулятора
+    $FilesToDelete = @(
+        "C:\\Scripts\\$Username`_emulator.bat",
+        "C:\\Scripts\\$Username`AndroidEmulator.exe", 
+        "C:\\Scripts\\$Username`_emulator.rdp"
+    )
+    
+    foreach ($File in $FilesToDelete) {{
+        if (Test-Path $File) {{
+            Remove-Item -Path $File -Force
+            Write-Host "✅ Удален файл: $File" -ForegroundColor Green
+        }} else {{
+            Write-Host "⚠️ Файл не найден: $File" -ForegroundColor Yellow
+        }}
+    }}
+    
+    # 3. Удаляем AVD файлы
+    $UserProfilePath = "C:\\Users\\$Username"
+    $UserProfilePathHP = "C:\\Users\\$Username.HP"
+    
+    # Проверяем обе возможные директории
+    $AvdDirs = @()
+    if (Test-Path $UserProfilePathHP) {{
+        $AvdDirs += "$UserProfilePathHP\\.android\\avd"
+    }}
+    if (Test-Path $UserProfilePath) {{
+        $AvdDirs += "$UserProfilePath\\.android\\avd"
+    }}
+    
+    foreach ($AvdDir in $AvdDirs) {{
+        if (Test-Path $AvdDir) {{
+            $AvdFiles = Get-ChildItem -Path $AvdDir -Filter "$Username`_*" -ErrorAction SilentlyContinue
+            foreach ($AvdFile in $AvdFiles) {{
+                Remove-Item -Path $AvdFile.FullName -Recurse -Force
+                Write-Host "✅ Удален AVD файл: $($AvdFile.Name)" -ForegroundColor Green
+            }}
+        }}
+    }}
+    
+    Write-Host "✅ SUCCESS: Эмулятор $EmulatorName полностью удален" -ForegroundColor Green
+    
+}} catch {{
+    Write-Host "❌ ERROR: Ошибка удаления эмулятора: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}}
+        '''
+        
+        # Выполняем скрипт удаления
+        result = execute_powershell_step('delete_emulator', delete_script)
+        
+        if result['success']:
+            # Удаляем эмулятор из базы данных
+            delete_emulator_db(emulator_id)
+            
+            write_log(f"Эмулятор {emulator['name']} успешно удален")
+            return jsonify({
+                'success': True,
+                'message': f'Эмулятор {emulator["name"]} успешно удален',
+                'cleanup_output': result['output']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Ошибка при удалении файлов эмулятора',
+                'output': result['output']
+            }), 500
+    
+    except Exception as e:
+        error_msg = f"Исключение при удалении эмулятора: {str(e)}"
         write_log(error_msg, 'ERROR')
         return jsonify({
             'success': False,
