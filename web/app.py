@@ -208,6 +208,27 @@ def create_emulator_db(operator_id, name, device, api_level, rdp_file=None):
         conn.close()
         return emulator_id
 
+def get_emulator_by_id_db(emulator_id):
+    """Получить эмулятор по его ID из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM emulators WHERE id = ?', (emulator_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            'id': row[0],
+            'operator_id': row[1],
+            'name': row[2],
+            'device': row[3],
+            'api_level': row[4],
+            'status': row[5],
+            'rdp_file': row[6],
+            'created_at': row[7]
+        }
+
 def get_operator_emulators_db(operator_id):
     """Получить эмуляторы оператора из базы данных"""
     with db_lock:
@@ -596,24 +617,33 @@ def api_admin_status():
         write_log(f"Ошибка в admin_status: {e}", 'ERROR')
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/download_rdp/<phone_id>', methods=['GET'])
-def api_download_rdp(phone_id):
-    """Скачивание RDP файла для конкретного телефона"""
+@app.route('/api/download_rdp/<emulator_id>', methods=['GET'])
+def api_download_rdp(emulator_id):
+    """Скачивание RDP файла для конкретного эмулятора"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     if not is_authenticated(token):
         return jsonify({'error': 'Не авторизован'}), 401
-    
-    if phone_id not in phones_db:
-        return jsonify({'error': 'Телефон не найден'}), 404
-    
-    phone = phones_db[phone_id]
-    rdp_file = phone.get('rdp_file')
-    
+
+    # Получаем данные сессии, чтобы ограничить доступ операторов только своими эмуляторами
+    session_data = sessions.get(token, {})
+    user_type = session_data.get('user_type')
+
+    emulator = get_emulator_by_id_db(emulator_id)
+    if not emulator:
+        return jsonify({'error': 'Эмулятор не найден'}), 404
+
+    # Если это оператор, проверяем, что эмулятор принадлежит ему
+    if user_type == 'operator':
+        operator_id = session_data.get('operator_id')
+        if not operator_id or emulator.get('operator_id') != operator_id:
+            return jsonify({'error': 'Доступ запрещен'}), 403
+
+    rdp_file = emulator.get('rdp_file')
     if not rdp_file or not os.path.exists(rdp_file):
         return jsonify({'error': 'RDP файл не найден'}), 404
-    
-    write_log(f"Скачивание RDP файла для телефона {phone_id}: {os.path.basename(rdp_file)}")
-    return send_file(rdp_file, as_attachment=True, download_name=f"{phone['name']}.rdp")
+
+    write_log(f"Скачивание RDP файла для эмулятора {emulator_id}: {os.path.basename(rdp_file)}")
+    return send_file(rdp_file, as_attachment=True, download_name=f"{emulator['name']}.rdp")
 
 # === API для управления операторами ===
 

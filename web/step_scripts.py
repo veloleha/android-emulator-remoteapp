@@ -355,8 +355,15 @@ try {
     
     # Создаем AVD через avdmanager с правильными параметрами устройства
     Write-Host "Создание AVD через avdmanager..." -ForegroundColor Gray
-    $CreateAvdCmd = "`"$AvdManagerPath`" create avd -n `"$AvdName`" -k `"system-images;android-36;google_apis_playstore;x86_64`" -d `"small_phone`" -c `"512M`" --force"
+    Write-Host "AVD Name: $AvdName" -ForegroundColor Cyan
+    Write-Host "ANDROID_AVD_HOME: $env:ANDROID_AVD_HOME" -ForegroundColor Cyan
+    
+    # Используем параметр -p для явного указания пути к AVD
+    $CreateAvdCmd = "`"$AvdManagerPath`" create avd -n `"$AvdName`" -k `"system-images;android-36;google_apis_playstore;x86_64`" -d `"small_phone`" -c `"512M`" -p `"$AndroidDir\\$AvdName.avd`" --force"
     Write-Host "Команда: $CreateAvdCmd" -ForegroundColor Gray
+    
+    # Устанавливаем переменные окружения для avdmanager
+    $env:ANDROID_AVD_HOME = $AndroidDir
     $result = cmd.exe /c $CreateAvdCmd
     
     if ($LASTEXITCODE -eq 0) {
@@ -484,6 +491,32 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo Текущая директория: %CD%
+echo.
+
+echo Проверка существования AVD...
+if exist "%ANDROID_AVD_HOME%\\$AvdName.avd" (
+    echo ✅ AVD найден: %ANDROID_AVD_HOME%\\$AvdName.avd
+) else (
+    echo ❌ AVD НЕ найден: %ANDROID_AVD_HOME%\\$AvdName.avd
+    echo Содержимое директории %ANDROID_AVD_HOME%:
+    if exist "%ANDROID_AVD_HOME%" (
+        dir "%ANDROID_AVD_HOME%" /b
+    ) else (
+        echo Директория %ANDROID_AVD_HOME% не существует!
+    )
+    echo.
+    echo Попробуем найти AVD в других местах:
+    if exist "C:\\Users\\$TestUser\\.android\\avd\\$AvdName.avd" (
+        echo Найден в: C:\\Users\\$TestUser\\.android\\avd\\$AvdName.avd
+        set ANDROID_AVD_HOME=C:\\Users\\$TestUser\\.android\\avd
+        echo Переключаемся на: %ANDROID_AVD_HOME%
+    )
+    if exist "C:\\Users\\$TestUser.HP\\.android\\avd\\$AvdName.avd" (
+        echo Найден в: C:\\Users\\$TestUser.HP\\.android\\avd\\$AvdName.avd
+        set ANDROID_AVD_HOME=C:\\Users\\$TestUser.HP\\.android\\avd
+        echo Переключаемся на: %ANDROID_AVD_HOME%
+    )
+)
 echo.
 
 echo Запуск эмулятора $AvdName...
