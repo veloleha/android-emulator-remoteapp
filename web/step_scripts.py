@@ -712,7 +712,7 @@ if exist "%ANDROID_AVD_HOME%\\*.lock" del /Q "%ANDROID_AVD_HOME%\\*.lock" 2>nul
 
 REM === Launch emulator ===
 set AVD_NAME=$AvdName
-set EMULATOR_ARGS=-avd "%AVD_NAME%" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full
+set EMULATOR_ARGS=-avd "%AVD_NAME%" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full -dns-server 8.8.8.8
 
 echo Starting emulator: %AVD_NAME%
 echo Command: emulator %EMULATOR_ARGS%
@@ -1038,58 +1038,16 @@ remoteapplicationprogram:s:||$AppName
 alternate shell:s:rdpinit.exe
 disableremoteappcapscheck:i:1
 prompt for credentials on client:i:1
-authentication level:i:2
 username:s:$Username
-domain:s:
-audiomode:i:2
+audiomode:i:0
 audioqualitymode:i:2
 audiocapturemode:i:1
 compression:i:1
 bitmapcachepersistenable:i:1
 videomode:i:32
-experience:i:1
+experience:i:0
 desktopwidth:i:1280
 desktopheight:i:720
-microphone redirection:i:1
-audio redirection:i:1
-session bpp:i:32
-allow font smoothing:i:1
-disable wallpaper:i:0
-disable full window drag:i:0
-disable menu anims:i:0
-disable themes:i:0
-disable cursor setting:i:0
-bitmapcachesize:i:1500
-screen mode id:i:2
-use multimon:i:0
-winposstr:s:0,1,0,0,1280,720
-keyboardhook:i:2
-videoplaybackmode:i:1
-connection type:i:7
-networkautodetect:i:1
-bandwidthautodetect:i:1
-displayconnectionbar:i:1
-enableworkspacereconnect:i:0
-allow desktop composition:i:1
-redirectprinters:i:1
-redirectcomports:i:0
-redirectsmartcards:i:1
-redirectwebauthn:i:1
-redirectclipboard:i:1
-redirectposdevices:i:0
-autoreconnection enabled:i:1
-negotiate security layer:i:1
-remoteapplicationicon:s:
-shell working directory:s:
-gatewayhostname:s:
-gatewayusagemethod:i:4
-gatewaycredentialssource:i:4
-gatewayprofileusagemethod:i:0
-promptcredentialonce:i:0
-gatewaybrokeringtype:i:0
-use redirection server name:i:0
-rdgiskdcproxy:i:0
-kdcproxyname:s:
 enablerdsaadauth:i:0
 redirectdrives:i:1
 "@
