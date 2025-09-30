@@ -1,3 +1,32 @@
+            <!-- Модальное окно входа оператора -->
+            <div class="modal fade" id="operatorLoginModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="fas fa-user me-2"></i>Вход оператора</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="operatorLoginFormModal" onsubmit="operatorLogin(event)">
+                                <div class="mb-3">
+                                    <label class="form-label">Логин</label>
+                                    <input type="text" class="form-control" id="operatorUsernameModal" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Пароль</label>
+                                    <input type="password" class="form-control" id="operatorPasswordModal" required>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                            <button type="button" class="btn btn-primary" onclick="submitOperatorLogin()">
+                                <i class="fas fa-sign-in-alt me-2"></i>Войти
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -96,8 +125,8 @@
 
         <!-- Основной контент -->
         <div class="container mt-4">
-            <!-- Форма входа администратора -->
-            <div id="adminLoginForm" class="row justify-content-center">
+            <!-- Форма входа администратора (скрыта по умолчанию) -->
+            <div id="adminLoginForm" class="row justify-content-center hidden">
                 <div class="col-md-6">
                     <div class="card">
                         <div class="card-header text-center">
@@ -107,16 +136,21 @@
                             <form onsubmit="adminLogin(event)">
                                 <div class="mb-3">
                                     <label class="form-label">Логин</label>
-                                    <input type="text" class="form-control" id="adminUsername" value="admin" required>
+                                    <input type="text" class="form-control" id="adminUsername" required>
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label">Пароль</label>
-                                    <input type="password" class="form-control" id="adminPassword" value="admin123" required>
+                                    <input type="password" class="form-control" id="adminPassword" required>
                                 </div>
                                 <button type="submit" class="btn btn-primary w-100">
                                     <i class="fas fa-sign-in-alt me-2"></i>Войти
                                 </button>
                             </form>
+                            <div class="text-center mt-3">
+                                <button class="btn btn-link" onclick="showOperatorLogin()">
+                                    Войти как оператор
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -127,12 +161,23 @@
                 <div class="row mb-4">
                     <div class="col">
                         <h2><i class="fas fa-users me-2"></i>Управление операторами</h2>
-                        <div class="btn-group" role="group">
+                        <div class="btn-group mb-2" role="group">
                             <button class="btn btn-success" onclick="createOperator()">
                                 <i class="fas fa-user-plus me-2"></i>Создать оператора
                             </button>
                             <button class="btn btn-info" onclick="showIPSettings()">
                                 <i class="fas fa-cog me-2"></i>Настройки IP
+                            </button>
+                        </div>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-warning" onclick="massDeleteEmulators()">
+                                <i class="fas fa-trash-alt me-2"></i>Удалить эмуляторы
+                            </button>
+                            <button class="btn btn-danger" onclick="massDeleteUsers()">
+                                <i class="fas fa-user-times me-2"></i>Удалить пользователей
+                            </button>
+                            <button class="btn btn-secondary" onclick="cleanupDatabase()">
+                                <i class="fas fa-database me-2"></i>Очистить БД
                             </button>
                         </div>
                     </div>
@@ -145,8 +190,8 @@
                 </div>
             </div>
 
-            <!-- Форма входа оператора -->
-            <div id="operatorLoginForm" class="row justify-content-center hidden">
+            <!-- Форма входа оператора (всегда видна на главной) -->
+            <div id="operatorLoginForm" class="row justify-content-center">
                 <div class="col-md-6">
                     <div class="card">
                         <div class="card-header text-center">
@@ -156,19 +201,23 @@
                             <form onsubmit="operatorLogin(event)">
                                 <div class="mb-3">
                                     <label class="form-label">Логин</label>
-                                    <input type="text" class="form-control" id="operatorUsername" required>
+                                    <input type="text" class="form-control" id="operatorUsername" placeholder="Имя оператора (например, User24)" required 
+                                           oninput="console.log('Username input:', this.value)">
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label">Пароль</label>
-                                    <input type="password" class="form-control" id="operatorPassword" required>
+                                    <input type="password" class="form-control" id="operatorPassword" placeholder="По умолчанию: UniCo2022" required
+                                           oninput="console.log('Password input:', this.value)">
+                                    <div class="form-text">Стандартный пароль оператора: <code>UniCo2022</code></div>
                                 </div>
+                                <div id="operatorLoginError" class="alert alert-danger py-2 px-3 mb-3" style="display:none;"></div>
                                 <button type="submit" class="btn btn-primary w-100">
                                     <i class="fas fa-sign-in-alt me-2"></i>Войти
                                 </button>
                             </form>
                             <div class="text-center mt-3">
                                 <button class="btn btn-link" onclick="showAdminLogin()">
-                                    Вход администратора
+                                    Войти как администратор
                                 </button>
                             </div>
                         </div>
@@ -208,22 +257,7 @@
                                     <label class="form-label">Название эмулятора</label>
                                     <input type="text" class="form-control" id="emulatorName" required>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Тип устройства</label>
-                                    <select class="form-select" id="deviceType">
-                                        <option value="small_phone">Small Phone</option>
-                                        <option value="pixel_6">Pixel 6</option>
-                                        <option value="tablet">Tablet</option>
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">API Level</label>
-                                    <select class="form-select" id="apiLevel">
-                                        <option value="android-36">Android 36 (API 36)</option>
-                                        <option value="android-34">Android 34 (API 34)</option>
-                                        <option value="android-33">Android 33 (API 33)</option>
-                                    </select>
-                                </div>
+                                <!-- ���� ������ ���������� � API Level �������: ������������ ����������� �������� AVD -->
                             </form>
                         </div>
                         <div class="modal-footer">
@@ -237,7 +271,7 @@
             </div>
 
             <!-- Модальное окно прогресса -->
-            <div class="modal fade" id="progressModal" tabindex="-1" data-bs-backdrop="static">
+            <div class="modal fade" id="progressModal" tabindex="-1">
                 <div class="modal-dialog modal-lg">
                     <div class="modal-content">
                         <div class="modal-header">
@@ -252,7 +286,7 @@
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" id="progressCloseBtn" 
-                                    onclick="closeProgressModal()" style="display: none;">Закрыть</button>
+                                    onclick="closeProgressModal()" style="display: none;">Окей</button>
                         </div>
                     </div>
                 </div>
@@ -288,20 +322,54 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Модальное окно входа оператора (используется при переходе из админки) -->
+            <div class="modal fade" id="operatorLoginModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="fas fa-user me-2"></i>Вход оператора</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="operatorLoginFormModal" onsubmit="operatorLogin(event)">
+    <div class="mb-3">
+        <label class="form-label">Логин</label>
+        <input type="text" class="form-control" id="operatorUsernameModal" required>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Пароль</label>
+        <input type="password" class="form-control" id="operatorPasswordModal" required>
+    </div>
+    <div id="operatorLoginModalError" class="alert alert-danger py-2 px-3 mb-3" style="display:none;"></div>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                            <button type="button" class="btn btn-primary" onclick="submitOperatorLoginModal()">
+                                <i class="fas fa-sign-in-alt me-2"></i>Войти
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let progressModal = null;
         let createEmulatorModal = null;
         let ipSettingsModal = null;
+        let operatorLoginModal = null;
         let currentToken = null;
         let currentUserType = null;
 
         // Инициализация
         document.addEventListener('DOMContentLoaded', function() {
-            progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
+            // Инициализируем модальные окна
+            progressModal = new bootstrap.Modal(document.getElementById('progressModal'), { backdrop: 'static', keyboard: false });
             createEmulatorModal = new bootstrap.Modal(document.getElementById('createEmulatorModal'));
             ipSettingsModal = new bootstrap.Modal(document.getElementById('ipSettingsModal'));
+            operatorLoginModal = new bootstrap.Modal(document.getElementById('operatorLoginModal'));
             
             // Проверяем сохраненный токен
             const savedToken = localStorage.getItem('token');
@@ -393,8 +461,72 @@
         // Вход оператора
         async function operatorLogin(event) {
             event.preventDefault();
-            const username = document.getElementById('operatorUsername').value;
-            const password = document.getElementById('operatorPassword').value;
+            // Упрощённая логика: если модалка открыта - используем её, иначе - инлайн форму
+            const modalVisible = document.getElementById('operatorLoginModal')?.classList.contains('show');
+            
+            let username, password;
+            if (modalVisible) {
+                // Используем данные из модальной формы
+                username = document.getElementById('operatorUsernameModal')?.value?.trim() || '';
+                password = document.getElementById('operatorPasswordModal')?.value?.trim() || '';
+                console.log('Using MODAL form');
+            } else {
+                // Используем данные из инлайн формы (по умолчанию)
+                const usernameField = document.getElementById('operatorUsername');
+                const passwordField = document.getElementById('operatorPassword');
+                
+                console.log('Username field found:', !!usernameField);
+                console.log('Password field found:', !!passwordField);
+                console.log('Username field ID:', usernameField?.id);
+                console.log('Password field ID:', passwordField?.id);
+                console.log('Username field value:', usernameField?.value);
+                console.log('Password field value:', passwordField?.value);
+                
+                username = usernameField?.value?.trim() || '';
+                password = passwordField?.value?.trim() || '';
+                console.log('Using INLINE form');
+            }
+            
+            console.log('Username:', JSON.stringify(username), 'Password:', JSON.stringify(password));
+
+            // Очищаем предыдущие ошибки (и в модалке, и в инлайне)
+            (function(){
+                const errEl = document.getElementById('operatorLoginError');
+                if (errEl) {
+                    errEl.textContent = '';
+                    errEl.style.display = 'none';
+                }
+                const modalErr = document.getElementById('operatorLoginModalError');
+                if (modalErr) {
+                    modalErr.textContent = '';
+                    modalErr.style.display = 'none';
+                }
+            })();
+
+            // Отладка: выводим значения в консоль
+            console.log('Username:', JSON.stringify(username));
+            console.log('Password:', JSON.stringify(password));
+            console.log('Username empty:', !username);
+            console.log('Password empty:', !password);
+
+            // Блокируем отправку если логин или пароль пустые
+            if (!username || !password) {
+                const modalShown = document.getElementById('operatorLoginModal')?.classList.contains('show');
+                if (modalShown) {
+                    const modalErr = document.getElementById('operatorLoginModalError');
+                    if (modalErr) {
+                        modalErr.textContent = 'Заполните логин и пароль';
+                        modalErr.style.display = 'block';
+                    }
+                } else {
+                    const errEl = document.getElementById('operatorLoginError');
+                    if (errEl) {
+                        errEl.textContent = 'Заполните логин и пароль';
+                        errEl.style.display = 'block';
+                    }
+                }
+                return;
+            }
 
             try {
                 const response = await fetch('/api/operator_login', {
@@ -402,19 +534,54 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
-
                 const data = await response.json();
-                if (data.success) {
+                if (response.ok && data.success) {
+                    // Скрыть обе ошибки
+                    const errEl = document.getElementById('operatorLoginError');
+                    if (errEl) errEl.style.display = 'none';
+                    const modalErr = document.getElementById('operatorLoginModalError');
+                    if (modalErr) modalErr.style.display = 'none';
                     currentToken = data.token;
                     currentUserType = 'operator';
                     localStorage.setItem('token', currentToken);
                     localStorage.setItem('userType', currentUserType);
+                    try { operatorLoginModal.hide(); } catch (e) {}
                     showOperatorPanel();
                 } else {
-                    alert('Ошибка входа: ' + data.error);
+                    const modalShown = document.getElementById('operatorLoginModal')?.classList.contains('show');
+                    if (modalShown) {
+                        const modalErr = document.getElementById('operatorLoginModalError');
+                        if (modalErr) {
+                            modalErr.textContent = data.error || 'Ошибка входа';
+                            modalErr.style.display = 'block';
+                        }
+                    } else {
+                        const errEl = document.getElementById('operatorLoginError');
+                        if (errEl) {
+                            errEl.textContent = data.error || 'Ошибка входа';
+                            errEl.style.display = 'block';
+                        } else {
+                            alert('Ошибка входа: ' + (data.error || 'Неизвестная ошибка'));
+                        }
+                    }
                 }
             } catch (error) {
-                alert('Ошибка подключения: ' + error.message);
+                const modalShown = document.getElementById('operatorLoginModal')?.classList.contains('show');
+                if (modalShown) {
+                    const modalErr = document.getElementById('operatorLoginModalError');
+                    if (modalErr) {
+                        modalErr.textContent = 'Ошибка подключения: ' + error.message;
+                        modalErr.style.display = 'block';
+                    }
+                } else {
+                    const errEl = document.getElementById('operatorLoginError');
+                    if (errEl) {
+                        errEl.textContent = 'Ошибка подключения: ' + error.message;
+                        errEl.style.display = 'block';
+                    } else {
+                        alert('Ошибка подключения: ' + error.message);
+                    }
+                }
             }
         }
 
@@ -447,9 +614,22 @@
         }
 
         // Показать форму входа оператора
-        function showOperatorLogin() {
-            document.getElementById('adminLoginForm').classList.add('hidden');
-            document.getElementById('operatorLoginForm').classList.remove('hidden');
+        // mode: 'modal' | 'inline' (по умолчанию inline). Если текущий пользователь админ — показываем модалку.
+        function showOperatorLogin(mode) {
+            const preferredModal = (mode === 'modal') || (currentUserType === 'admin');
+            if (preferredModal) {
+                // Очищаем поля модалки
+                const u = document.getElementById('operatorUsernameModal');
+                const p = document.getElementById('operatorPasswordModal');
+                if (u) u.value = '';
+                if (p) p.value = '';
+                operatorLoginModal.show();
+            } else {
+                // НЕ очищаем поля инлайн формы - пользователь может их заполнить
+                document.getElementById('adminLoginForm').classList.add('hidden');
+                document.getElementById('operatorLoginForm').classList.remove('hidden');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
         }
 
         // Выход
@@ -467,6 +647,9 @@
 
         // Создание оператора
         async function createOperator() {
+            // Во время выполнения запрещаем закрытие модалки кликом вне её
+            try { progressModal.dispose(); } catch (e) {}
+            progressModal = new bootstrap.Modal(document.getElementById('progressModal'), { backdrop: 'static', keyboard: false });
             showProgress('Создание оператора', 'Создание пользователя Windows и инициализация SDK...');
             
             try {
@@ -545,9 +728,14 @@
                                 <div class="mb-2">
                                     <strong>Пароль:</strong> <code>${operator.password}</code>
                                 </div>
-                                <button class="btn btn-info btn-sm" onclick="loginAsOperator('${operator.username}', '${operator.password}')">
-                                    <i class="fas fa-sign-in-alt me-1"></i>Войти как оператор
-                                </button>
+                                <div class="btn-group" role="group">
+                                    <button class="btn btn-info btn-sm" onclick='loginAsOperator(${JSON.stringify(operator.username)}, ${JSON.stringify(operator.password)})'>
+                                        <i class="fas fa-sign-in-alt me-1"></i>Войти
+                                    </button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteOperator('${operator.id}', '${operator.username}')" title="Удалить оператора">
+                                        <i class="fas fa-trash me-1"></i>Удалить
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -555,11 +743,78 @@
             `).join('');
         }
 
-        // Вход как оператор
-        function loginAsOperator(username, password) {
-            document.getElementById('operatorUsername').value = username;
-            document.getElementById('operatorPassword').value = password;
-            showOperatorLogin();
+        // Удаление оператора
+        async function deleteOperator(operatorId, operatorUsername) {
+            if (!confirm(`Вы уверены, что хотите удалить оператора "${operatorUsername}"?\n\nЭто действие:\n• Удалит пользователя Windows\n• Удалит все эмуляторы оператора\n• Удалит все файлы и записи в реестре\n\nЭто действие необратимо!`)) {
+                return;
+            }
+            
+            showProgress('Удаление оператора', `Удаление оператора ${operatorUsername} и всех его данных...`);
+            
+            try {
+                const response = await fetch(`/api/delete_operator/${operatorId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateProgress(100, `Оператор ${operatorUsername} успешно удален!`);
+                    appendProgressLog(`✅ Удален пользователь: ${data.deleted_user}`);
+                    appendProgressLog(`🗑️ Удалены все файлы и эмуляторы`);
+                    appendProgressLog(`📝 Очищен реестр RemoteApp`);
+                    
+                    setTimeout(() => {
+                        closeProgressModal();
+                        loadOperators(); // Обновляем список операторов
+                    }, 2000);
+                } else {
+                    updateProgress(0, 'Ошибка удаления оператора');
+                    appendProgressLog(`❌ Ошибка: ${data.error}`);
+                    showProgressCloseButton();
+                }
+            } catch (error) {
+                updateProgress(0, 'Ошибка подключения');
+                appendProgressLog(`❌ Ошибка: ${error.message}`);
+                showProgressCloseButton();
+            }
+        }
+
+        // Вход как оператор (из админки): авто-вход, если не удалось — открыть пустую модалку
+        async function loginAsOperator(username, password) {
+            // Сначала пробуем авто-вход
+            try {
+                const response = await fetch('/api/operator_login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    currentToken = data.token;
+                    currentUserType = 'operator';
+                    localStorage.setItem('token', currentToken);
+                    localStorage.setItem('userType', currentUserType);
+                    showOperatorPanel();
+                    return;
+                }
+            } catch (e) {
+                // игнорируем
+            }
+            // Если не удалось — открываем пустую модалку для ручного ввода
+            const u = document.getElementById('operatorUsernameModal');
+            const p = document.getElementById('operatorPasswordModal');
+            if (u) u.value = '';
+            if (p) p.value = '';
+            showOperatorLogin('modal');
+        }
+
+        function submitOperatorLoginModal() {
+            const form = document.getElementById('operatorLoginFormModal');
+            if (form) {
+                operatorLogin(new Event('submit'));
+            }
         }
 
         // Создание эмулятора
@@ -570,8 +825,8 @@
         // Отправка формы создания эмулятора
         async function submitCreateEmulator() {
             const name = document.getElementById('emulatorName').value;
-            const device = document.getElementById('deviceType').value;
-            const apiLevel = document.getElementById('apiLevel').value;
+            
+            
 
             createEmulatorModal.hide();
             showProgress('Создание эмулятора', 'Создание AVD, batch файла, EXE и настройка RemoteApp...');
@@ -583,7 +838,7 @@
                         'Authorization': `Bearer ${currentToken}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ name, device, api_level: apiLevel })
+                    body: JSON.stringify({ name })
                 });
 
                 const data = await response.json();
@@ -655,6 +910,11 @@
                                 </p>
                             </div>
                             <div class="col-md-4 text-end">
+                                <div class="mb-2">
+                                    <small class="text-info">
+                                        <i class="fas fa-key me-1"></i><strong>Пароль для RDP:</strong> <code>UniCo2022</code>
+                                    </small>
+                                </div>
                                 <div class="btn-group-vertical" role="group">
                                     <button class="btn btn-primary btn-sm mb-1" onclick="downloadRDP('${emulator.id}', '${emulator.name}')">
                                         <i class="fas fa-download me-1"></i>Скачать RDP
@@ -716,6 +976,162 @@
             const log = document.getElementById('progressLog');
             log.innerHTML += '<br>' + message;
             log.scrollTop = log.scrollHeight;
+        }
+    </script>
+    <script>
+        // Функции для управления модалкой прогресса
+        function showProgress(title, subtitle) {
+            document.getElementById('progressTitle').textContent = title || 'Выполнение операции...';
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressLog').innerHTML = subtitle ? `<div>${subtitle}</div>` : '';
+            const closeBtn = document.getElementById('progressCloseBtn');
+            if (closeBtn) closeBtn.style.display = 'none';
+            try { progressModal.show(); } catch (e) {}
+        }
+
+        function updateProgress(percent, title) {
+            if (typeof percent === 'number') {
+                document.getElementById('progressBar').style.width = `${percent}%`;
+            }
+            if (title) {
+                document.getElementById('progressTitle').textContent = title;
+            }
+        }
+
+        function appendProgressLog(line) {
+            const log = document.getElementById('progressLog');
+            log.innerHTML += `<div>${line}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function showProgressCloseButton() {
+            // Делаем модалку закрываемой кликом по фону и по Esc
+            try { progressModal.dispose(); } catch (e) {}
+            progressModal = new bootstrap.Modal(document.getElementById('progressModal'), { backdrop: true, keyboard: true });
+            const closeBtn = document.getElementById('progressCloseBtn');
+            if (closeBtn) closeBtn.style.display = 'inline-block';
+        }
+
+        function closeProgressModal() {
+            try { progressModal.hide(); } catch (e) {}
+        }
+
+        // Удаление эмулятора
+        async function deleteEmulator(emulatorId, emulatorName) {
+            if (!confirm(`Вы уверены, что хотите удалить эмулятор "${emulatorName}"?\n\nЭто действие:\n• Удалит AVD файлы\n• Удалит batch и EXE файлы\n• Удалит запись из реестра RemoteApp\n• Удалит RDP файл\n\nЭто действие необратимо!`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/delete_emulator/${emulatorId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Эмулятор успешно удален');
+                    loadOperatorEmulators(); // Обновляем список
+                } else {
+                    alert('Ошибка удаления: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
+        }
+
+        // Удаление оператора (админ)
+        async function deleteOperator(operatorId, operatorName) {
+            if (!confirm(`Вы уверены, что хотите удалить оператора "${operatorName}"?\n\nЭто действие:\n• Удалит все эмуляторы оператора\n• Удалит пользователя Windows\n• Удалит все файлы и настройки\n• Очистит записи в базе данных\n\nЭто действие необратимо!`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/delete_operator/${operatorId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert(`Оператор "${operatorName}" успешно удален\n\nУдалено:\n${data.deleted_items.join('\n')}\n\nЭмуляторов удалено: ${data.emulators_deleted}`);
+                    loadOperators(); // Обновляем список
+                } else {
+                    alert('Ошибка удаления оператора: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
+        }
+
+        // Массовое удаление эмуляторов (админ)
+        async function massDeleteEmulators() {
+            if (!confirm('Вы уверены, что хотите удалить ВСЕ эмуляторы, которых нет в базе данных?\n\nЭто действие необратимо!')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/mass_delete_emulators', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Массовое удаление эмуляторов завершено успешно!');
+                } else {
+                    alert('Ошибка массового удаления эмуляторов: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
+        }
+
+        // Массовое удаление пользователей (админ)
+        async function massDeleteUsers() {
+            if (!confirm('Вы уверены, что хотите удалить ВСЕХ пользователей Android Emulator, которых нет в базе данных?\n\nЭто действие необратимо!')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/mass_delete_users', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Массовое удаление пользователей завершено успешно!');
+                } else {
+                    alert('Ошибка массового удаления пользователей: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
+        }
+
+        // Очистка базы данных (админ)
+        async function cleanupDatabase() {
+            if (!confirm('Вы уверены, что хотите очистить базу данных от записей эмуляторов без файлов?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/cleanup_database', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert(`Очистка базы данных завершена!\n\nУдалено записей: ${data.deleted_count}`);
+                    loadOperators(); // Обновляем список
+                } else {
+                    alert('Ошибка очистки базы данных: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка подключения: ' + error.message);
+            }
         }
     </script>
   </body>

@@ -9,28 +9,15 @@ STEP_SCRIPTS = {
     'create_user': r'''
 # Шаг 1: Создание пользователя Windows
 
-# Поиск следующего доступного номера пользователя через net user
-$AllUsers = net user | Where-Object { $_ -match "User\d+" }
-$UserNumbers = @()
-foreach ($line in $AllUsers) {
-    $users = $line -split '\s+' | Where-Object { $_ -match "^User\d+$" }
-    foreach ($user in $users) {
-        if ($user -match "^User(\d+)$") {
-            $UserNumbers += [int]$matches[1]
-        }
+# Поиск следующего доступного номера пользователя
+$UserNumber = 1
+do {
+    $Username = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $UserNumber++
     }
-}
-
-if ($UserNumbers.Count -gt 0) {
-    $MaxUserNumber = ($UserNumbers | Measure-Object -Maximum).Maximum
-    $UserNumber = $MaxUserNumber + 1
-} else {
-    $UserNumber = 1
-}
-
-$Username = "User$UserNumber"
-Write-Host "Найдены пользователи: $($UserNumbers -join ', ')" -ForegroundColor Gray
-Write-Host "Создается новый пользователь: $Username" -ForegroundColor Gray
+} while ($UserExists)
 
 # Используем единый пароль для всех операторов
 $Password = if ($env:OPERATOR_PASSWORD) { $env:OPERATOR_PASSWORD } else { "UniCo2022" }
@@ -371,176 +358,104 @@ count=0
     ''',
     
     'copy_template_avd': r'''
-# Шаг 2: Копирование готового AVD с предустановленными приложениями из phone1
-Write-Host "=== COPYING AVD FROM PHONE1 TEMPLATE ===" -ForegroundColor Yellow
+# Шаг 2: Копирование готового AVD с предустановленными приложениями
+# Копирует готовый образ C:\\Users\\user\\.android\\avd\\phone1.avd
 
-# Находим последнего созданного пользователя через net user
-$AllUsers = net user | Where-Object { $_ -match "User\d+" }
-$UserNumbers = @()
-foreach ($line in $AllUsers) {
-    $users = $line -split '\s+' | Where-Object { $_ -match "^User\d+$" }
-    foreach ($user in $users) {
-        if ($user -match "^User(\d+)$") {
-            $UserNumbers += [int]$matches[1]
-        }
+Write-Host "📱 Копирование готового AVD с предустановленными приложениями..." -ForegroundColor Yellow
+
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
     }
-}
+} while ($UserExists)
 
-if ($UserNumbers.Count -gt 0) {
-    $MaxUserNumber = ($UserNumbers | Measure-Object -Maximum).Maximum
-    $LastValidUser = "User$MaxUserNumber"
-    Write-Host "Found users: $($UserNumbers -join ', ')" -ForegroundColor Gray
-    Write-Host "Using user: $LastValidUser" -ForegroundColor Gray
-} else {
-    Write-Host "ERROR: Could not find User* users" -ForegroundColor Red
+Write-Host "Последний пользователь: $LastValidUser" -ForegroundColor Gray
+
+if (-not $LastValidUser -or $LastValidUser -eq "") {
+    Write-Host "ERROR: Не удалось найти последнего пользователя" -ForegroundColor Red
     exit 1
 }
 
-# Form names
 $UserNum = $LastValidUser.Replace('User', '')
 $EmulatorName = if ($env:EMULATOR_NAME) { $env:EMULATOR_NAME } else { "Emulator" }
 $SafeEmulatorName = $EmulatorName -replace '[^a-zA-Z0-9_]', '_'
 $AvdName = "User$UserNum`_$SafeEmulatorName"
 
-# Template settings - phone1 with apps (~12 GB)
+Write-Host "UserNum: $UserNum" -ForegroundColor Gray
+Write-Host "EmulatorName: $EmulatorName" -ForegroundColor Gray
+Write-Host "SafeEmulatorName: $SafeEmulatorName" -ForegroundColor Gray
+
+# Настройки шаблона
 $TemplateAvdPath = "C:\\Users\\user\\.android\\avd\\phone1.avd"
 
-Write-Host "Template AVD: $TemplateAvdPath" -ForegroundColor Gray
-Write-Host "New AVD: $AvdName" -ForegroundColor Cyan
+Write-Host "Шаблон AVD: $TemplateAvdPath" -ForegroundColor Gray
+Write-Host "Новый AVD: $AvdName" -ForegroundColor Cyan
 
-# Check template existence
+# Проверяем существование шаблона
 if (!(Test-Path $TemplateAvdPath)) {
-    Write-Host "ERROR: Template AVD not found: $TemplateAvdPath" -ForegroundColor Red
+    Write-Host "ERROR: Шаблон AVD не найден: $TemplateAvdPath" -ForegroundColor Red
     exit 1
-} else {
-    Write-Host "SUCCESS: Template found!" -ForegroundColor Green
 }
 
-# Get template size
-$TemplateSize = (Get-ChildItem -Path $TemplateAvdPath -Recurse | Measure-Object -Property Length -Sum).Sum
-$TemplateSizeMB = [math]::Round($TemplateSize / 1MB, 2)
-Write-Host "Template size: $TemplateSizeMB MB" -ForegroundColor Gray
-
-# Determine target paths - check main directory first, then .HP
+# Определяем целевые пути
 $UserProfilePath = "C:\\Users\\$LastValidUser"
 $UserProfilePathHP = "C:\\Users\\$LastValidUser.HP"
+$ActualUserProfile = if (Test-Path $UserProfilePathHP) { $UserProfilePathHP } else { $UserProfilePath }
 
-# Check which directory has .android folder or use main directory
-$MainAndroidDir = "$UserProfilePath\\.android"
-$HPAndroidDir = "$UserProfilePathHP\\.android"
-
-if (Test-Path $MainAndroidDir) {
-    $ActualUserProfile = $UserProfilePath
-    Write-Host "Using main profile (has .android): $ActualUserProfile" -ForegroundColor Gray
-} elseif (Test-Path $HPAndroidDir) {
-    $ActualUserProfile = $UserProfilePathHP
-    Write-Host "Using HP profile (has .android): $ActualUserProfile" -ForegroundColor Gray
-} elseif (Test-Path $UserProfilePath) {
-    $ActualUserProfile = $UserProfilePath
-    Write-Host "Using main profile (exists): $ActualUserProfile" -ForegroundColor Gray
-} else {
-    $ActualUserProfile = $UserProfilePathHP
-    Write-Host "Using HP profile (fallback): $ActualUserProfile" -ForegroundColor Gray
-}
-
-$AndroidBaseDir = "$ActualUserProfile\\.android"
-$TargetAndroidDir = "$AndroidBaseDir\\avd"
+$TargetAndroidDir = "$ActualUserProfile\\.android\\avd"
 $TargetAvdPath = "$TargetAndroidDir\\$AvdName.avd"
 $TargetIniPath = "$TargetAndroidDir\\$AvdName.ini"
 
 try {
-    # Create directories
+    # Создаем директории
+    $AndroidBaseDir = "$ActualUserProfile\\.android"
     if (!(Test-Path $AndroidBaseDir)) {
         New-Item -ItemType Directory -Path $AndroidBaseDir -Force | Out-Null
-        Write-Host "Created directory: $AndroidBaseDir" -ForegroundColor Gray
     }
     if (!(Test-Path $TargetAndroidDir)) {
         New-Item -ItemType Directory -Path $TargetAndroidDir -Force | Out-Null
-        Write-Host "Created directory: $TargetAndroidDir" -ForegroundColor Gray
     }
-
-    # Create lock files to prevent errors
-    Write-Host "Creating lock files..." -ForegroundColor Yellow
-    $LockFiles = @(
-        "$AndroidBaseDir\\emu-last-feature-flags.protobuf",
-        "$AndroidBaseDir\\emu-last-feature-flags.protobuf.lock",
-        "$AndroidBaseDir\\emulator-check.exe.lock",
-        "$AndroidBaseDir\\pid.lock",
-        "$AndroidBaseDir\\cache.lock",
-        "$AndroidBaseDir\\modem-nv-ram-5554",
-        "$AndroidBaseDir\\modem-nv-ram-5556"
-    )
-
-    foreach ($LockFile in $LockFiles) {
-        if (!(Test-Path $LockFile)) {
-            New-Item -ItemType File -Path $LockFile -Force -ErrorAction SilentlyContinue | Out-Null
-        }
-    }
-
-    # Remove existing AVD if exists
+    
+    # Удаляем существующий AVD
     if (Test-Path $TargetAvdPath) {
-        Write-Host "Removing existing AVD..." -ForegroundColor Yellow
         Remove-Item -Recurse -Force $TargetAvdPath -ErrorAction SilentlyContinue
     }
     if (Test-Path $TargetIniPath) {
         Remove-Item -Force $TargetIniPath -ErrorAction SilentlyContinue
     }
-
-    # Copy AVD from template (main operation)
-    Write-Host "Copying AVD from phone1 template..." -ForegroundColor Yellow
-    $StartTime = Get-Date
+    
+    # Копируем AVD
     Copy-Item -Path $TemplateAvdPath -Destination $TargetAvdPath -Recurse -Force
-    $EndTime = Get-Date
-    $Duration = ($EndTime - $StartTime).TotalSeconds
-    Write-Host "AVD copied in $([math]::Round($Duration, 1)) seconds" -ForegroundColor Green
-
-    # Update config.ini with new paths
+    
+    # Обновляем config.ini
     $ConfigPath = "$TargetAvdPath\\config.ini"
     if (Test-Path $ConfigPath) {
-        Write-Host "Updating config.ini..." -ForegroundColor Yellow
+        Write-Host "Обновление config.ini..." -ForegroundColor Yellow
         $ConfigContent = Get-Content $ConfigPath
-        $ConfigContent = $ConfigContent -replace "phone1", $AvdName
-        $ConfigContent = $ConfigContent -replace "user", $LastValidUser
-        $ConfigContent = $ConfigContent -replace "C:\\\\Users\\\\user", $ActualUserProfile
         
-        # Add network settings for internet
-        $NetworkSettings = @{
-            "hw.gps" = "yes"
-            "hw.gsmModem" = "yes"
-            "hw.network" = "yes"
-            "hw.wifi" = "yes"
-            "netfast" = "yes"
-            "netdelay" = "none"
-            "netspeed" = "full"
+        # Безопасная замена путей
+        if ($AvdName -and $AvdName -ne "") {
+            $ConfigContent = $ConfigContent -replace "phone1", $AvdName
+        }
+        if ($LastValidUser -and $LastValidUser -ne "") {
+            $ConfigContent = $ConfigContent -replace "user", $LastValidUser
+        }
+        if ($ActualUserProfile -and $ActualUserProfile -ne "") {
+            # Простая замена без сложного экранирования
+            $ConfigContent = $ConfigContent.Replace("C:\Users\user", $ActualUserProfile)
+            $ConfigContent = $ConfigContent.Replace("C:\\Users\\user", $ActualUserProfile)
         }
         
-        $NewConfigContent = @()
-        $SettingsAdded = @{}
-        
-        foreach ($line in $ConfigContent) {
-            $NewConfigContent += $line
-            # Mark which settings already exist
-            foreach ($setting in $NetworkSettings.Keys) {
-                if ($line -match "^$setting=") {
-                    $SettingsAdded[$setting] = $true
-                }
-            }
-        }
-        
-        # Add missing settings
-        foreach ($setting in $NetworkSettings.Keys) {
-            if (-not $SettingsAdded[$setting]) {
-                $NewConfigContent += "$setting=$($NetworkSettings[$setting])"
-            }
-        }
-        
-        Set-Content -Path $ConfigPath -Value $NewConfigContent -Encoding UTF8
-        Write-Host "config.ini updated" -ForegroundColor Green
-    } else {
-        Write-Host "WARNING: config.ini not found" -ForegroundColor Yellow
+        Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
+        Write-Host "config.ini обновлен" -ForegroundColor Green
     }
-
-    # Create .ini file
+    
+    # Создаем .ini файл
     $IniContent = @"
 avd.ini.encoding=UTF-8
 path=$TargetAvdPath
@@ -550,231 +465,452 @@ hw.audioInput=yes
 hw.audioOutput=yes
 "@
     Set-Content -Path $TargetIniPath -Value $IniContent -Encoding UTF8
-    Write-Host ".ini file created" -ForegroundColor Green
-
-    # Set permissions for RemoteApp
-    Write-Host "Setting up permissions..." -ForegroundColor Yellow
-    try {
-        # Take ownership
-        takeown /F "$AndroidBaseDir" /R /D Y 2>&1 | Out-Null
-        
-        # Set permissions using SIDs (more reliable)
-        icacls "$AndroidBaseDir" /grant *S-1-1-0:(OI)(CI)F /T /C /Q 2>&1 | Out-Null      # Everyone
-        icacls "$AndroidBaseDir" /grant *S-1-5-18:(OI)(CI)F /T /C /Q 2>&1 | Out-Null     # SYSTEM
-        icacls "$AndroidBaseDir" /grant *S-1-5-32-545:(OI)(CI)F /T /C /Q 2>&1 | Out-Null # Users
-        icacls "$AndroidBaseDir" /grant "$LastValidUser":(OI)(CI)F /T /C /Q 2>&1 | Out-Null
-        
-        # Set permissions on lock files specifically
-        foreach ($LockFile in $LockFiles) {
-            if (Test-Path $LockFile) {
-                icacls "$LockFile" /grant *S-1-1-0:F /C /Q 2>&1 | Out-Null  # Everyone
-                icacls "$LockFile" /grant *S-1-5-18:F /C /Q 2>&1 | Out-Null  # SYSTEM
-            }
-        }
-        
-        Write-Host "Permissions configured" -ForegroundColor Green
-    } catch {
-        Write-Host "WARNING: Could not set some permissions" -ForegroundColor Yellow
-    }
-
-    # Show results and quality control
-    $AvdSize = (Get-ChildItem -Path $TargetAvdPath -Recurse | Measure-Object -Property Length -Sum).Sum
-    $AvdSizeMB = [math]::Round($AvdSize / 1MB, 2)
     
-    # Quality control - check file count
-    $TemplateFileCount = (Get-ChildItem -Path $TemplateAvdPath -Recurse -File).Count
-    $TargetFileCount = (Get-ChildItem -Path $TargetAvdPath -Recurse -File).Count
-
-    Write-Host ""
-    Write-Host "SUCCESS: AVD successfully copied from phone1 template!" -ForegroundColor Green
+    # Настраиваем права доступа для RDP
+    icacls $ActualUserProfile /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+    icacls $AndroidBaseDir /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+    icacls $AndroidBaseDir /grant "Users:(OI)(CI)F" /T /Q | Out-Null
+    icacls $AndroidBaseDir /grant "SYSTEM:(OI)(CI)F" /T /Q | Out-Null
+    icacls $TargetAvdPath /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+    icacls $TargetIniPath /grant "Everyone:F" /Q | Out-Null
+    
+    Write-Host "SUCCESS: AVD скопирован из готового шаблона: $AvdName" -ForegroundColor Green
     Write-Host "AVD_NAME: $AvdName" -ForegroundColor Cyan
     Write-Host "AVD_PATH: $TargetAvdPath" -ForegroundColor Cyan
-    Write-Host "AVD_SIZE: $AvdSizeMB MB (template: $TemplateSizeMB MB)" -ForegroundColor Cyan
-    Write-Host "FILES: $TargetFileCount (template: $TemplateFileCount)" -ForegroundColor Cyan
     
-    if ($TargetFileCount -eq $TemplateFileCount) {
-        Write-Host "SUCCESS: File count matches - copy successful!" -ForegroundColor Green
-    } else {
-        Write-Host "WARNING: File count mismatch - possible issues" -ForegroundColor Yellow
-    }
-    
-    Write-Host "COPY TIME: $([math]::Round($Duration, 1)) seconds" -ForegroundColor Gray
-    Write-Host ""
-
 } catch {
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
     ''',
-    
-    
-    'create_batch': r'''
-# Шаг 3: Создание batch файла без BOM для запуска эмулятора
-Write-Host "=== CREATING BATCH FILE (NO BOM) ===" -ForegroundColor Yellow
-
-# Find last user via net user
-$AllUsers = net user | Where-Object { $_ -match "User\d+" }
-$UserNumbers = @()
-foreach ($line in $AllUsers) {
-    $users = $line -split '\s+' | Where-Object { $_ -match "^User\d+$" }
-    foreach ($user in $users) {
-        if ($user -match "^User(\d+)$") {
-            $UserNumbers += [int]$matches[1]
+            }
+            
+            # Создаем символическую ссылку
+            cmd.exe /c mklink /D "$LinkPath" "$TargetPath" | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ Создана символическая ссылка: $LinkPath -> $TargetPath" -ForegroundColor Green
+            } else {
+                Write-Host "⚠️ Не удалось создать символическую ссылку, копируем файлы" -ForegroundColor Yellow
+                # Если симлинк не удался, создаем обычную директорию
+                if (!(Test-Path $LinkPath)) {
+                    New-Item -ItemType Directory -Path $LinkPath -Force | Out-Null
+                    icacls $LinkPath /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+                }
+            }
+        } catch {
+            Write-Host "⚠️ Ошибка создания символической ссылки: $($_.Exception.Message)" -ForegroundColor Yellow
+            # Создаем обычную директорию как fallback
+            if (!(Test-Path $LinkPath)) {
+                New-Item -ItemType Directory -Path $LinkPath -Force | Out-Null
+                icacls $LinkPath /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+            }
         }
     }
+} else {
+    Write-Host "Используется обычный профиль: $UserProfilePath" -ForegroundColor Yellow
 }
 
-if ($UserNumbers.Count -gt 0) {
-    $MaxUserNumber = ($UserNumbers | Measure-Object -Maximum).Maximum
-    $LastValidUser = "User$MaxUserNumber"
-    Write-Host "Using user: $LastValidUser" -ForegroundColor Gray
-} else {
-    Write-Host "ERROR: Could not find User* users" -ForegroundColor Red
+# Используем фактический профиль для создания AVD
+$UserProfilePath = $ActualUserProfile
+
+$env:ANDROID_AVD_HOME = "$UserProfilePath\\.android\\avd"
+Write-Host "Финальный ANDROID_AVD_HOME: $env:ANDROID_AVD_HOME" -ForegroundColor Cyan
+
+$AvdManagerPath = "$AndroidHome\\cmdline-tools\\latest\\bin\\avdmanager.bat"
+
+Write-Host "📱 Создание AVD через avdmanager..." -ForegroundColor Yellow
+Write-Host "AVD Name: $AvdName" -ForegroundColor Cyan
+Write-Host "ANDROID_AVD_HOME: $env:ANDROID_AVD_HOME" -ForegroundColor Gray
+
+if (!(Test-Path $AvdManagerPath)) {
+    Write-Host "❌ ERROR: AVD Manager не найден по пути: $AvdManagerPath" -ForegroundColor Red
+    Write-Host "Убедитесь, что Android SDK установлен правильно" -ForegroundColor Yellow
     exit 1
 }
 
-# Form names
-$UserNum = $LastValidUser.Replace('User', '')
+try {
+    # Создаем .android директорию если не существует
+    $AndroidBaseDir = "$UserProfilePath\\.android"
+    $AndroidDir = "$AndroidBaseDir\\avd"
+    
+    if (!(Test-Path $AndroidBaseDir)) {
+        New-Item -ItemType Directory -Path $AndroidBaseDir -Force
+        Write-Host "Создана базовая директория: $AndroidBaseDir" -ForegroundColor Gray
+    }
+    
+    if (!(Test-Path $AndroidDir)) {
+        New-Item -ItemType Directory -Path $AndroidDir -Force
+        Write-Host "Создана директория AVD: $AndroidDir" -ForegroundColor Gray
+    }
+    
+    # Создаем дополнительные директории для эмулятора
+    $CacheDir = "$AndroidBaseDir\\cache"
+    $TempDir = "$AndroidBaseDir\\temp"
+    
+    if (!(Test-Path $CacheDir)) {
+        New-Item -ItemType Directory -Path $CacheDir -Force
+        Write-Host "Создана директория cache: $CacheDir" -ForegroundColor Gray
+    }
+    
+    if (!(Test-Path $TempDir)) {
+        New-Item -ItemType Directory -Path $TempDir -Force
+        Write-Host "Создана директория temp: $TempDir" -ForegroundColor Gray
+    }
+    
+    # Настраиваем права доступа для RemoteApp совместимости
+    Write-Host "🔐 Настройка прав доступа для RemoteApp..." -ForegroundColor Yellow
+    try {
+        icacls $AndroidBaseDir /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+        icacls $AndroidBaseDir /grant "Users:(OI)(CI)F" /T /Q | Out-Null
+        icacls $AndroidBaseDir /grant "Administrators:(OI)(CI)F" /T /Q | Out-Null
+        icacls $AndroidBaseDir /grant "SYSTEM:(OI)(CI)F" /T /Q | Out-Null
+        
+        # Создаем пустые lock файлы для предотвращения ошибок эмулятора
+        $LockFiles = @(
+            "$AndroidBaseDir\\emu-last-feature-flags.protobuf",
+            "$AndroidBaseDir\\emu-last-feature-flags.protobuf.lock",
+            "$AndroidBaseDir\\emulator-check.exe.lock"
+        )
+        
+        foreach ($LockFile in $LockFiles) {
+            if (!(Test-Path $LockFile)) {
+                try {
+                    New-Item -ItemType File -Path $LockFile -Force | Out-Null
+                    icacls $LockFile /grant "Everyone:F" /Q | Out-Null
+                    icacls $LockFile /grant "Users:F" /Q | Out-Null
+                    icacls $LockFile /grant "Administrators:F" /Q | Out-Null
+                    icacls $LockFile /grant "SYSTEM:F" /Q | Out-Null
+                    Write-Host "Создан lock файл: $LockFile" -ForegroundColor Gray
+                } catch {
+                    Write-Host "⚠️ Не удалось создать lock файл: $LockFile" -ForegroundColor Yellow
+                }
+            }
+        }
+        
+        Write-Host "✅ Права доступа и lock файлы настроены на: $AndroidBaseDir" -ForegroundColor Green
+    } catch {
+        Write-Host "⚠️ WARNING: Не удалось настроить права доступа: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    
+    # Удаляем существующий AVD если есть
+    $ExistingAvdPath = "$AndroidDir\\$AvdName.avd"
+    $ExistingIniPath = "$AndroidDir\\$AvdName.ini"
+    
+    # Сначала очищаем все lock файлы
+    Write-Host "🔄 Очистка lock файлов..." -ForegroundColor Yellow
+    Get-ChildItem -Path $AndroidBaseDir -Filter "*.lock" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    if (Test-Path $ExistingAvdPath) {
+        Get-ChildItem -Path $ExistingAvdPath -Filter "*.lock" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+    
+    if (Test-Path $ExistingAvdPath) {
+        Remove-Item -Recurse -Force $ExistingAvdPath -ErrorAction SilentlyContinue
+        Write-Host "Удален существующий AVD: $AvdName" -ForegroundColor Gray
+    }
+    if (Test-Path $ExistingIniPath) {
+        Remove-Item -Force $ExistingIniPath -ErrorAction SilentlyContinue
+    }
+    
+    # Создаем AVD через avdmanager с правильными параметрами устройства
+    Write-Host "Создание AVD через avdmanager..." -ForegroundColor Gray
+    Write-Host "AVD Name: $AvdName" -ForegroundColor Cyan
+    Write-Host "ANDROID_AVD_HOME: $env:ANDROID_AVD_HOME" -ForegroundColor Cyan
+    
+    # Используем параметр -p для явного указания пути к AVD
+    $CreateAvdCmd = "`"$AvdManagerPath`" create avd -n `"$AvdName`" -k `"system-images;android-36;google_apis_playstore;x86_64`" -d `"small_phone`" -c `"512M`" -p `"$AndroidDir\\$AvdName.avd`" --force"
+    Write-Host "Команда: $CreateAvdCmd" -ForegroundColor Gray
+    
+    # Устанавливаем переменные окружения для avdmanager
+    $env:ANDROID_AVD_HOME = $AndroidDir
+    $result = cmd.exe /c $CreateAvdCmd
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ SUCCESS: AVD $AvdName создан успешно" -ForegroundColor Green
+        Write-Host "AVD_NAME: $AvdName" -ForegroundColor Cyan
+        
+        # Проверяем, что AVD действительно создался
+        $AvdPath = "$AndroidDir\\$AvdName.avd"
+        if (Test-Path $AvdPath) {
+            Write-Host "AVD_PATH: $AvdPath" -ForegroundColor Cyan
+            
+            # Создаем дополнительные lock файлы в директории AVD
+            $AvdLockFiles = @(
+                "$AvdPath\\hardware-qemu.ini.lock",
+                "$AvdPath\\config.ini.lock"
+            )
+            
+            foreach ($LockFile in $AvdLockFiles) {
+                try {
+                    New-Item -ItemType File -Path $LockFile -Force | Out-Null
+                    icacls $LockFile /grant "Everyone:F" /Q | Out-Null
+                    icacls $LockFile /grant "SYSTEM:F" /Q | Out-Null
+                    Write-Host "Создан AVD lock файл: $LockFile" -ForegroundColor Gray
+                } catch {
+                    Write-Host "⚠️ Не удалось создать AVD lock файл: $LockFile" -ForegroundColor Yellow
+                }
+            }
+            
+            # Оптимизируем config.ini
+            $ConfigPath = "$AvdPath\\config.ini"
+            if (Test-Path $ConfigPath) {
+                Write-Host "🔧 Оптимизация конфигурации AVD..." -ForegroundColor Yellow
+                
+                $ConfigContent = Get-Content $ConfigPath -Raw
+                $ConfigContent = $ConfigContent -replace "hw\\.ramSize=.*", "hw.ramSize=4096"
+                $ConfigContent = $ConfigContent -replace "hw\\.gpu\\.mode=.*", "hw.gpu.mode=auto"
+                $ConfigContent = $ConfigContent -replace "hw\\.cpu\\.ncore=.*", "hw.cpu.ncore=4"
+                
+                # Добавляем недостающие параметры
+                if ($ConfigContent -notmatch "hw\\.gpu\\.enabled") {
+                    $ConfigContent += "`nhw.gpu.enabled=yes"
+                }
+                if ($ConfigContent -notmatch "hw\\.audioInput") {
+                    $ConfigContent += "`nhw.audioInput=yes"
+                }
+                if ($ConfigContent -notmatch "hw\\.audioOutput") {
+                    $ConfigContent += "`nhw.audioOutput=yes"
+                }
+                
+                Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
+                Write-Host "✅ Конфигурация оптимизирована" -ForegroundColor Green
+                Write-Host "CONFIG_PATH: $ConfigPath" -ForegroundColor Cyan
+            }
+            
+            # Обновляем .ini файл для микрофона
+            $IniPath = "$AndroidDir\\$AvdName.ini"
+            if (Test-Path $IniPath) {
+                Write-Host "🎤 Добавление поддержки микрофона в .ini файл..." -ForegroundColor Yellow
+                Add-Content -Path $IniPath -Value "hw.audioInput=yes" -Encoding UTF8
+                Add-Content -Path $IniPath -Value "hw.audioOutput=yes" -Encoding UTF8
+                Write-Host "✅ Поддержка аудио добавлена" -ForegroundColor Green
+            }
+            
+            # Назначаем полные права на созданный AVD
+            Write-Host "🔐 Настройка прав доступа на AVD..." -ForegroundColor Yellow
+            try {
+                icacls $AvdPath /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+                icacls $AvdPath /grant "Users:(OI)(CI)F" /T /Q | Out-Null
+                icacls $AvdPath /grant "Administrators:(OI)(CI)F" /T /Q | Out-Null
+                icacls $AvdPath /grant "SYSTEM:(OI)(CI)F" /T /Q | Out-Null
+                
+                if (Test-Path $IniPath) {
+                    icacls $IniPath /grant "Everyone:F" /Q | Out-Null
+                    icacls $IniPath /grant "Users:F" /Q | Out-Null
+                    icacls $IniPath /grant "Administrators:F" /Q | Out-Null
+                    icacls $IniPath /grant "SYSTEM:F" /Q | Out-Null
+                }
+                
+                Write-Host "✅ Права доступа на AVD настроены" -ForegroundColor Green
+            } catch {
+                Write-Host "⚠️ Не удалось настроить права на AVD: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            
+            # Если используется .HP профиль, создаем копию AVD в обычной директории для совместимости
+            if ($ActualUserProfile -like "*.HP") {
+                $NormalProfilePath = $ActualUserProfile -replace "\\.HP$", ""
+                $NormalAndroidDir = "$NormalProfilePath\\.android\\avd"
+                $NormalAvdPath = "$NormalAndroidDir\\$AvdName.avd"
+                $NormalIniPath = "$NormalAndroidDir\\$AvdName.ini"
+                
+                Write-Host "🔄 Создание копии AVD в обычной директории для совместимости..." -ForegroundColor Yellow
+                
+                try {
+                    # Создаем директории
+                    if (!(Test-Path $NormalAndroidDir)) {
+                        New-Item -ItemType Directory -Path $NormalAndroidDir -Force | Out-Null
+                        icacls $NormalAndroidDir /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+                        Write-Host "Создана директория: $NormalAndroidDir" -ForegroundColor Gray
+                    }
+                    
+                    # Копируем AVD директорию
+                    if (Test-Path $AvdPath) {
+                        Copy-Item -Path $AvdPath -Destination $NormalAvdPath -Recurse -Force
+                        icacls $NormalAvdPath /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+                        Write-Host "Скопирована AVD директория: $NormalAvdPath" -ForegroundColor Gray
+                    }
+                    
+                    # Копируем .ini файл
+                    if (Test-Path $IniPath) {
+                        Copy-Item -Path $IniPath -Destination $NormalIniPath -Force
+                        icacls $NormalIniPath /grant "Everyone:F" /Q | Out-Null
+                        Write-Host "Скопирован .ini файл: $NormalIniPath" -ForegroundColor Gray
+                    }
+                    
+                    Write-Host "✅ Копия AVD создана в обычной директории" -ForegroundColor Green
+                } catch {
+                    Write-Host "⚠️ Не удалось создать копию AVD: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+        }
+    } else {
+        Write-Host "❌ ERROR: Не удалось создать AVD. Код выхода: $LASTEXITCODE" -ForegroundColor Red
+        Write-Host "Вывод: $result" -ForegroundColor Gray
+        exit 1
+    }
+} catch {
+    Write-Host "❌ ERROR: Ошибка создания AVD: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+    ''',
+    
+    'create_batch': r'''
+# Шаг 3: Создание batch файла для запуска эмулятора
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
+    }
+} while ($UserExists)
+# Используем последнего созданного пользователя
+$TestUser = $LastValidUser
+$UserNum = $TestUser.Replace('User', '')
 $EmulatorName = if ($env:EMULATOR_NAME) { $env:EMULATOR_NAME } else { "Emulator" }
 $SafeEmulatorName = $EmulatorName -replace '[^a-zA-Z0-9_]', '_'
 $AvdName = "User$UserNum`_$SafeEmulatorName"
+$BatchFilePath = "C:\\Scripts\\$TestUser`_$SafeEmulatorName.bat"
 
-# Determine paths - check main directory first, then .HP
-$UserProfilePath = "C:\\Users\\$LastValidUser"
-$UserProfilePathHP = "C:\\Users\\$LastValidUser.HP"
+Write-Host "🔄 Создание batch файла для запуска эмулятора..." -ForegroundColor Yellow
 
-# Check which directory has .android folder or use main directory
-$MainAndroidDir = "$UserProfilePath\\.android"
-$HPAndroidDir = "$UserProfilePathHP\\.android"
-
-if (Test-Path $MainAndroidDir) {
-    $ActualUserProfile = $UserProfilePath
-    Write-Host "Using main profile (has .android): $ActualUserProfile" -ForegroundColor Gray
-} elseif (Test-Path $HPAndroidDir) {
-    $ActualUserProfile = $UserProfilePathHP
-    Write-Host "Using HP profile (has .android): $ActualUserProfile" -ForegroundColor Gray
-} elseif (Test-Path $UserProfilePath) {
-    $ActualUserProfile = $UserProfilePath
-    Write-Host "Using main profile (exists): $ActualUserProfile" -ForegroundColor Gray
-} else {
-    $ActualUserProfile = $UserProfilePathHP
-    Write-Host "Using HP profile (fallback): $ActualUserProfile" -ForegroundColor Gray
-}
-
-# Create batch file
-$BatchFilePath = "C:\\Scripts\\$AvdName.bat"
-
-Write-Host "Creating batch file: $BatchFilePath" -ForegroundColor Cyan
-
-# Ensure Scripts directory exists
+# Убедимся, что директория Scripts существует
 if (!(Test-Path "C:\\Scripts")) {
-    New-Item -ItemType Directory -Path "C:\\Scripts" -Force | Out-Null
+    New-Item -ItemType Directory -Path "C:\\Scripts" -Force
+    Write-Host "Создана директория C:\\Scripts" -ForegroundColor Gray
 }
 
-# Create batch content with proper encoding (NO BOM)
 $BatchContent = @"
 @echo off
-REM ========================================
-REM Android Emulator Launcher - $AvdName
-REM Fixed version without BOM
-REM ========================================
+REM Android эмулятор для пользователя $TestUser
+REM AVD: $AvdName
+REM Создан: $(Get-Date)
 
-REM === Set user profile explicitly ===
-set USERPROFILE=$ActualUserProfile
-set JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.16.8-hotspot
+echo ========================================
+echo Android Emulator Launcher - $TestUser
+echo ========================================
 
-REM === Android SDK paths ===
+REM Устанавливаем переменные окружения Android SDK
 set ANDROID_HOME=C:\\Program Files\\Android
-set ANDROID_SDK_ROOT=%ANDROID_HOME%
-set ANDROID_PREFS_ROOT=%USERPROFILE%\\.android
-set ANDROID_AVD_HOME=%USERPROFILE%\\.android\\avd
-
-REM === Update PATH ===
+set ANDROID_SDK_ROOT=C:\\Program Files\\Android
+set JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.16.8-hotspot
+REM Проверяем наличие директории с суффиксом .HP (приоритет HP директории)
+if exist "C:\\Users\\$TestUser.HP" (
+    set ANDROID_AVD_HOME=C:\\Users\\$TestUser.HP\\.android\\avd
+    echo Используется директория с суффиксом .HP: %ANDROID_AVD_HOME%
+) else (
+    set ANDROID_AVD_HOME=C:\\Users\\$TestUser\\.android\\avd
+    echo Используется обычная директория: %ANDROID_AVD_HOME%
+)
 set PATH=%JAVA_HOME%\\bin;%ANDROID_HOME%\\platform-tools;%ANDROID_HOME%\\emulator;%ANDROID_HOME%\\cmdline-tools\\latest\\bin;%PATH%
 
-echo ========================================
-echo ANDROID EMULATOR LAUNCHER
-echo ========================================
-echo USERPROFILE=%USERPROFILE%
+echo Переменные окружения:
 echo ANDROID_HOME=%ANDROID_HOME%
+echo ANDROID_SDK_ROOT=%ANDROID_SDK_ROOT%
+echo JAVA_HOME=%JAVA_HOME%
 echo ANDROID_AVD_HOME=%ANDROID_AVD_HOME%
-echo AVD_NAME=$AvdName
+echo.
+
+echo Пользователь: $TestUser
+echo AVD: $AvdName
 echo ========================================
-echo.
 
-REM === Create directories if needed ===
-if not exist "%ANDROID_PREFS_ROOT%" mkdir "%ANDROID_PREFS_ROOT%"
-if not exist "%ANDROID_AVD_HOME%" mkdir "%ANDROID_AVD_HOME%"
-
-REM === Clean lock files ===
-if exist "%ANDROID_PREFS_ROOT%\\*.lock" del /Q "%ANDROID_PREFS_ROOT%\\*.lock" 2>nul
-if exist "%ANDROID_AVD_HOME%\\*.lock" del /Q "%ANDROID_AVD_HOME%\\*.lock" 2>nul
-
-REM === Launch emulator ===
-set AVD_NAME=$AvdName
-set EMULATOR_ARGS=-avd "%AVD_NAME%" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full
-
-echo Starting emulator: %AVD_NAME%
-echo Command: emulator %EMULATOR_ARGS%
-echo.
-
+echo Переход в директорию эмулятора...
 cd /d "%ANDROID_HOME%\\emulator"
-emulator %EMULATOR_ARGS%
+if %ERRORLEVEL% NEQ 0 (
+    echo ОШИБКА: Не удалось перейти в директорию эмулятора
+    pause
+    exit /b 1
+)
 
+echo Текущая директория: %CD%
+echo.
+
+echo Проверка существования AVD...
+if exist "%ANDROID_AVD_HOME%\\$AvdName.avd" (
+    echo ✅ AVD найден: %ANDROID_AVD_HOME%\\$AvdName.avd
+) else (
+    echo ❌ AVD НЕ найден: %ANDROID_AVD_HOME%\\$AvdName.avd
+    echo Содержимое директории %ANDROID_AVD_HOME%:
+    if exist "%ANDROID_AVD_HOME%" (
+        dir "%ANDROID_AVD_HOME%" /b
+    ) else (
+        echo Директория %ANDROID_AVD_HOME% не существует!
+    )
+    echo.
+    echo Попробуем найти AVD в других местах:
+    if exist "C:\\Users\\$TestUser\\.android\\avd\\$AvdName.avd" (
+        echo Найден в: C:\\Users\\$TestUser\\.android\\avd\\$AvdName.avd
+        set ANDROID_AVD_HOME=C:\\Users\\$TestUser\\.android\\avd
+        echo Переключаемся на: %ANDROID_AVD_HOME%
+    )
+    if exist "C:\\Users\\$TestUser.HP\\.android\\avd\\$AvdName.avd" (
+        echo Найден в: C:\\Users\\$TestUser.HP\\.android\\avd\\$AvdName.avd
+        set ANDROID_AVD_HOME=C:\\Users\\$TestUser.HP\\.android\\avd
+        echo Переключаемся на: %ANDROID_AVD_HOME%
+    )
+)
+echo.
+
+echo Очистка блокировок эмулятора...
+REM Удаляем lock файлы перед запуском
+if exist "%ANDROID_AVD_HOME%\\$AvdName.avd\\*.lock" (
+    del /Q "%ANDROID_AVD_HOME%\\$AvdName.avd\\*.lock"
+    echo Удалены lock файлы AVD
+)
+if exist "%USERPROFILE%\\.android\\*.lock" (
+    del /Q "%USERPROFILE%\\.android\\*.lock"
+    echo Удалены общие lock файлы
+)
+
+echo Запуск эмулятора $AvdName...
+echo Команда: emulator -avd "$AvdName" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full -verbose -wipe-data
+echo.
+
+REM Пробуем запустить эмулятор с очисткой данных
+emulator -avd "$AvdName" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full -verbose -wipe-data
+
+REM Если первый запуск не удался, пробуем в режиме только для чтения
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [ERROR] Emulator failed to start
-    echo Trying with -read-only flag...
-    emulator %EMULATOR_ARGS% -read-only
+    echo Первый запуск не удался, пробуем режим только для чтения...
+    echo Команда: emulator -avd "$AvdName" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full -verbose -read-only
+    echo.
+    emulator -avd "$AvdName" -no-snapshot -gpu host -memory 4096 -no-boot-anim -netdelay none -netspeed full -verbose -read-only
 )
 
 echo.
-echo [INFO] Emulator session ended
+echo Эмулятор завершил работу
 pause
 "@
 
-# Write batch file with ASCII encoding (NO BOM)
 try {
-    # Use .NET method to ensure no BOM
-    [System.IO.File]::WriteAllText($BatchFilePath, $BatchContent, [System.Text.Encoding]::ASCII)
-    
-    Write-Host "SUCCESS: Batch file created without BOM!" -ForegroundColor Green
+    Set-Content -Path $BatchFilePath -Value $BatchContent -Encoding ASCII
+    Write-Host "✅ SUCCESS: Batch файл создан: $BatchFilePath" -ForegroundColor Green
     Write-Host "BATCH_FILE: $BatchFilePath" -ForegroundColor Cyan
     
-    # Check file size
+    # Проверяем размер файла
     $FileInfo = Get-Item $BatchFilePath
-    Write-Host "File size: $($FileInfo.Length) bytes" -ForegroundColor Gray
-    
+    Write-Host "Размер файла: $($FileInfo.Length) байт" -ForegroundColor Gray
 } catch {
-    Write-Host "ERROR: Failed to create batch file: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "❌ ERROR: Ошибка создания batch файла: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
     ''',
     
     'convert_to_exe': r'''
 # Шаг 4: Создание EXE файла через C# компиляцию
-# Находим последнего созданного пользователя через net user
-$AllUsers = net user | Where-Object { $_ -match "User\d+" }
-$UserNumbers = @()
-foreach ($line in $AllUsers) {
-    $users = $line -split '\s+' | Where-Object { $_ -match "^User\d+$" }
-    foreach ($user in $users) {
-        if ($user -match "^User(\d+)$") {
-            $UserNumbers += [int]$matches[1]
-        }
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
     }
-}
-
-if ($UserNumbers.Count -gt 0) {
-    $MaxUserNumber = ($UserNumbers | Measure-Object -Maximum).Maximum
-    $LastValidUser = "User$MaxUserNumber"
-} else {
-    Write-Host "ERROR: Не удалось найти пользователей" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "Найдены пользователи: $($UserNumbers -join ', ')" -ForegroundColor Gray
-Write-Host "Используется пользователь: $LastValidUser" -ForegroundColor Gray
+} while ($UserExists)
 
 # Используем последнего созданного пользователя
 $TestUser = $LastValidUser
@@ -901,28 +1037,16 @@ public class AndroidEmulatorLauncher
     
     'configure_remoteapp': r'''
 # Шаг 5: Настройка RemoteApp в реестре Windows
-# Находим последнего созданного пользователя через net user
-$AllUsers = net user | Where-Object { $_ -match "User\d+" }
-$UserNumbers = @()
-foreach ($line in $AllUsers) {
-    $users = $line -split '\s+' | Where-Object { $_ -match "^User\d+$" }
-    foreach ($user in $users) {
-        if ($user -match "^User(\d+)$") {
-            $UserNumbers += [int]$matches[1]
-        }
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
     }
-}
-
-if ($UserNumbers.Count -gt 0) {
-    $MaxUserNumber = ($UserNumbers | Measure-Object -Maximum).Maximum
-    $LastValidUser = "User$MaxUserNumber"
-} else {
-    Write-Host "ERROR: Не удалось найти пользователей" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "Найдены пользователи: $($UserNumbers -join ', ')" -ForegroundColor Gray
-Write-Host "Используется пользователь: $LastValidUser" -ForegroundColor Gray
+} while ($UserExists)
 
 # Используем последнего созданного пользователя
 $TestUser = $LastValidUser
@@ -992,28 +1116,16 @@ try {
     
     'create_rdp': r'''
 # Шаг 6: Создание RDP файла для подключения
-# Находим последнего созданного пользователя через net user
-$AllUsers = net user | Where-Object { $_ -match "User\d+" }
-$UserNumbers = @()
-foreach ($line in $AllUsers) {
-    $users = $line -split '\s+' | Where-Object { $_ -match "^User\d+$" }
-    foreach ($user in $users) {
-        if ($user -match "^User(\d+)$") {
-            $UserNumbers += [int]$matches[1]
-        }
+# Находим последнего созданного пользователя
+$UserNumber = 1
+do {
+    $TestUser = "User$UserNumber"
+    $UserExists = Get-LocalUser -Name $TestUser -ErrorAction SilentlyContinue
+    if ($UserExists) {
+        $LastValidUser = $TestUser
+        $UserNumber++
     }
-}
-
-if ($UserNumbers.Count -gt 0) {
-    $MaxUserNumber = ($UserNumbers | Measure-Object -Maximum).Maximum
-    $LastValidUser = "User$MaxUserNumber"
-} else {
-    Write-Host "ERROR: Не удалось найти пользователей" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "Найдены пользователи: $($UserNumbers -join ', ')" -ForegroundColor Gray
-Write-Host "Используется пользователь: $LastValidUser" -ForegroundColor Gray
+} while ($UserExists)
 
 # Используем последнего созданного пользователя
 $TestUser = $LastValidUser
@@ -1239,9 +1351,8 @@ try {
     # 6. Удаляем пользователя Windows
     Write-Host "🗑️ Удаление пользователя Windows..." -ForegroundColor Yellow
     try {
-        # Проверяем существование пользователя через net user
-        $UserCheck = net user $OperatorUsername 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        $User = Get-LocalUser -Name $OperatorUsername -ErrorAction SilentlyContinue
+        if ($User) {
             Remove-LocalUser -Name $OperatorUsername -ErrorAction Stop
             Write-Host "Удален пользователь: $OperatorUsername" -ForegroundColor Gray
         } else {
@@ -1361,10 +1472,10 @@ STEP_DESCRIPTIONS = {
         'description': 'Создает нового пользователя Windows с уникальным именем и добавляет его в группу Remote Desktop Users',
         'expected_output': 'USERNAME и PASSWORD нового пользователя'
     },
-    'copy_template_avd': {
-        'title': '2️⃣ Копирование готового AVD',
-        'description': 'Копирует готовый AVD с предустановленными приложениями из шаблона phone1 (~11 ГБ)',
-        'expected_output': 'AVD_NAME скопированного виртуального устройства'
+    'create_avd': {
+        'title': '2️⃣ Создание Android Virtual Device',
+        'description': 'Создает новый AVD с оптимизированными настройками для RemoteApp',
+        'expected_output': 'AVD_NAME созданного виртуального устройства'
     },
     'create_batch': {
         'title': '3️⃣ Создание batch файла',

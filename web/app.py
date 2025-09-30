@@ -17,7 +17,7 @@ import subprocess
 import hashlib
 import uuid
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
@@ -102,6 +102,10 @@ def init_database():
         # Устанавливаем IP по умолчанию если не установлен
         cursor.execute('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', 
                       ('rdp_ip', DEFAULT_RDP_IP))
+        
+        # Обновляем пароли всех существующих операторов на единый пароль
+        cursor.execute('UPDATE operators SET password = ? WHERE password != ?', 
+                      (OPERATOR_PASSWORD, OPERATOR_PASSWORD))
         
         conn.commit()
         conn.close()
@@ -251,6 +255,36 @@ def get_operator_emulators_db(operator_id):
             })
         return emulators
 
+def get_operator_by_id_db(operator_id):
+    """Получить оператора по ID из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM operators WHERE id = ?', (operator_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            'id': row[0],
+            'username': row[1],
+            'password': row[2],
+            'status': row[3],
+            'created_at': row[4]
+        }
+
+def delete_operator_db(operator_id):
+    """Удалить оператора и все его эмуляторы из базы данных"""
+    with db_lock:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        # Сначала удаляем все эмуляторы оператора
+        cursor.execute('DELETE FROM emulators WHERE operator_id = ?', (operator_id,))
+        # Затем удаляем самого оператора
+        cursor.execute('DELETE FROM operators WHERE id = ?', (operator_id,))
+        conn.commit()
+        conn.close()
+
 def delete_emulator_db(emulator_id):
     """Удалить эмулятор из базы данных"""
     with db_lock:
@@ -270,6 +304,98 @@ def get_user_from_token(token):
         return sessions[token].get('user')
     return None
 
+def execute_fixed_script(script_name, emulator_name=None, user_context=None):
+    """Выполнение исправленных скриптов из папки scripts"""
+    try:
+        write_log(f"Выполнение исправленного скрипта: {script_name}")
+        
+        # Определяем путь к скрипту в папке проекта
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script_path = os.path.join(project_root, 'scripts', f'{script_name}.ps1')
+        
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(f"Скрипт не найден: {script_path}")
+        
+        # Подготавливаем команду
+        cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', script_path]
+        
+        # Добавляем параметры если нужно
+        if emulator_name:
+            cmd.extend(['-EmulatorName', emulator_name])
+        
+        # Подготавливаем переменные окружения
+        env = os.environ.copy()
+        if user_context:
+            if 'rdp_ip' in user_context:
+                env['RDP_IP'] = user_context['rdp_ip']
+            if 'operator_password' in user_context:
+                env['OPERATOR_PASSWORD'] = user_context['operator_password']
+            if 'username' in user_context:
+                env['USERNAME_OVERRIDE'] = user_context['username']
+        if emulator_name:
+            env['EMULATOR_NAME'] = emulator_name
+        
+        write_log(f"Команда: {' '.join(cmd)}")
+        
+        # Выполняем скрипт
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 минут таймаут
+            encoding='utf-8',
+            errors='replace',
+            env=env
+        )
+        
+        output = result.stdout
+        error = result.stderr
+        
+        write_log(f"Код возврата: {result.returncode}")
+        write_log(f"Вывод: {output}")
+        if error:
+            write_log(f"Ошибки: {error}")
+        
+        # Парсим результат
+        success = result.returncode == 0
+        
+        # Извлекаем важные значения из вывода
+        extracted_values = {}
+        if output:
+            # Ищем AVD_NAME
+            avd_match = re.search(r'AVD_NAME:\s*(.+)', output)
+            if avd_match:
+                extracted_values['AVD_NAME'] = avd_match.group(1).strip()
+            
+            # Ищем BATCH_FILE
+            batch_match = re.search(r'BATCH_FILE:\s*(.+)', output)
+            if batch_match:
+                extracted_values['BATCH_FILE'] = batch_match.group(1).strip()
+            
+            # Ищем размер
+            size_match = re.search(r'AVD_SIZE:\s*(.+?)\s*MB', output)
+            if size_match:
+                extracted_values['AVD_SIZE'] = size_match.group(1).strip() + ' MB'
+        
+        # Автоисправления теперь встроены в основные скрипты
+        
+        return {
+            'success': success,
+            'output': output,
+            'error': error,
+            'extracted_values': extracted_values
+        }
+        
+    except Exception as e:
+        error_msg = f"Ошибка выполнения скрипта {script_name}: {str(e)}"
+        write_log(error_msg)
+        return {
+            'success': False,
+            'output': '',
+            'error': error_msg,
+            'extracted_values': {}
+        }
+
 def execute_powershell_step(step_name, script_content, user_context=None):
     """Выполнение отдельного шага PowerShell скрипта"""
     try:
@@ -278,7 +404,7 @@ def execute_powershell_step(step_name, script_content, user_context=None):
         # Проверяем права администратора для шагов, требующих повышенных прав
         admin_required_steps = {
             'create_user',
-            'create_avd',
+            'copy_template_avd',
             'create_batch',
             'convert_to_exe',
             'configure_remoteapp',
@@ -441,6 +567,7 @@ def api_login():
         token = str(uuid.uuid4())
         sessions[token] = {
             'authenticated': True,
+            'user_type': 'admin',
             'user': {
                 'id': '1',
                 'telegramUsername': username,
@@ -742,6 +869,9 @@ def api_create_operator():
                     }
                 
                 write_log(f"Оператор создан успешно: {parsed_result['username']}")
+                
+                # Автоисправления теперь встроены в основные скрипты
+                
                 return jsonify({
                     'success': True,
                     'operator': new_operator,
@@ -772,12 +902,32 @@ def api_create_operator():
 def api_operator_login():
     """Вход в систему под оператором"""
     data = request.get_json()
-    username = data.get('username', '')
-    password = data.get('password', '')
-    
-    # Ищем оператора в базе данных
-    operator = get_operator_db(username)
-    if operator and operator['password'] == password:
+    username_raw = (data.get('username') or '').strip()
+    password = (data.get('password') or '').strip()
+
+    # Ищем оператора в базе данных (без учета регистра)
+    operator = get_operator_db(username_raw)
+    if not operator:
+        try:
+            with db_lock:
+                conn = sqlite3.connect(DATABASE_PATH)
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM operators WHERE LOWER(username) = LOWER(?)', (username_raw,))
+                row = cursor.fetchone()
+                conn.close()
+                if row:
+                    operator = {
+                        'id': row[0],
+                        'username': row[1],
+                        'password': row[2],
+                        'status': row[3],
+                        'created_at': row[4]
+                    }
+        except Exception as e:
+            write_log(f"Ошибка поиска оператора: {e}", 'ERROR')
+
+    # Сверяем пароль: допускаем текущий пароль из БД ИЛИ единый OPERATOR_PASSWORD
+    if operator and (password == operator['password'] or password == OPERATOR_PASSWORD):
         # Создаем токен сессии для оператора
         token = str(uuid.uuid4())
         sessions[token] = {
@@ -792,14 +942,14 @@ def api_operator_login():
             'created_at': datetime.now()
         }
         
-        write_log(f"Успешный вход оператора {username} с IP: {request.remote_addr}")
+        write_log(f"Успешный вход оператора {operator['username']} с IP: {request.remote_addr}")
         return jsonify({
             'success': True,
             'token': token,
             'operator': operator
         })
     else:
-        write_log(f"Неудачная попытка входа оператора с IP: {request.remote_addr}, имя: {username}", 'WARNING')
+        write_log(f"Неудачная попытка входа оператора с IP: {request.remote_addr}, имя: {username_raw}", 'WARNING')
         return jsonify({
             'success': False,
             'error': 'Неверные учетные данные оператора'
@@ -864,8 +1014,14 @@ def api_create_emulator():
             'operator_password': OPERATOR_PASSWORD
         }
         
-        # Выполняем полную цепочку создания эмулятора
-        steps = ['create_avd', 'create_batch', 'convert_to_exe', 'configure_remoteapp', 'create_rdp']
+        # Выполняем полную цепочку создания эмулятора с встроенными исправлениями
+        write_log("Используем основные скрипты с встроенными исправлениями")
+        
+        # Импортируем скрипты шагов
+        from step_scripts import STEP_SCRIPTS
+        
+        # Выполняем все шаги последовательно
+        steps = ['copy_template_avd', 'create_batch', 'convert_to_exe', 'configure_remoteapp', 'create_rdp']
         results = {}
         
         for step in steps:
@@ -905,7 +1061,7 @@ def api_create_emulator():
             'created_at': datetime.now().isoformat(),
             'operator_id': operator_id,
             'operator_username': operator['username'],
-            'avd_name': parsed_results.get('create_avd', {}).get('avd_name', ''),
+            'avd_name': parsed_results.get('copy_template_avd', {}).get('avd_name', ''),
             'batch_file': parsed_results.get('create_batch', {}).get('batch_file', ''),
             'exe_file': parsed_results.get('convert_to_exe', {}).get('exe_file', ''),
             'rdp_file': rdp_file,
@@ -927,6 +1083,179 @@ def api_create_emulator():
             'error': error_msg
         }), 500
 
+@app.route('/api/delete_operator/<operator_id>', methods=['DELETE'])
+def api_delete_operator(operator_id):
+    """Полное удаление оператора и всех его эмуляторов"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'admin':
+        return jsonify({'error': 'Доступ только для администраторов'}), 403
+    
+    # Получаем оператора из базы данных
+    operator = get_operator_by_id_db(operator_id)
+    if not operator:
+        return jsonify({'error': 'Оператор не найден'}), 404
+    
+    operator_username = operator['username']
+    write_log(f"Удаление оператора {operator_username} (ID: {operator_id})")
+    
+    try:
+        deleted_items = []
+        errors = []
+        
+        # 1. Получаем все эмуляторы оператора
+        emulators = get_operator_emulators_db(operator_id)
+        write_log(f"Найдено эмуляторов для удаления: {len(emulators)}")
+        
+        # 2. Удаляем все эмуляторы оператора
+        for emulator in emulators:
+            try:
+                write_log(f"Удаление эмулятора {emulator['name']}")
+                
+                # Используем прямой вызов скрипта для надежности
+                script_path = "C:\\Scripts\\delete_emulator_en.ps1"
+                emulator_name = emulator['name']
+                
+                if not os.path.exists(script_path):
+                    errors.append(f"Скрипт удаления не найден: {script_path}")
+                    continue
+                
+                cmd = [
+                    'powershell.exe', '-ExecutionPolicy', 'Bypass',
+                    '-File', script_path,
+                    '-EmulatorName', emulator_name,
+                    '-UserName', operator_username
+                ]
+                
+                try:
+                    result_subprocess = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                        encoding='utf-8',
+                        errors='replace'
+                    )
+                    
+                    if result_subprocess.returncode == 0:
+                        result = {'success': True}
+                    else:
+                        result = {'success': False}
+                        errors.append(f"Ошибка удаления эмулятора {emulator_name}: код {result_subprocess.returncode}")
+                        
+                except Exception as e:
+                    result = {'success': False}
+                    errors.append(f"Ошибка запуска скрипта для {emulator_name}: {str(e)}")
+                    continue
+                
+                if result['success']:
+                    # Удаляем эмулятор из базы данных
+                    delete_emulator_db(emulator['id'])
+                    deleted_items.append(f"Эмулятор: {emulator['name']}")
+                    write_log(f"Эмулятор {emulator['name']} успешно удален")
+                else:
+                    errors.append(f"Ошибка удаления эмулятора {emulator['name']}: {result.get('output', 'Неизвестная ошибка')}")
+                    
+            except Exception as e:
+                errors.append(f"Исключение при удалении эмулятора {emulator['name']}: {str(e)}")
+        
+        # 3. Удаляем пользователя Windows
+        try:
+            write_log(f"Удаление пользователя Windows: {operator_username}")
+            
+            user_delete_script = f'''
+# Удаление пользователя Windows и его профилей
+$Username = "{operator_username}"
+
+Write-Host "Deleting Windows user: $Username" -ForegroundColor Yellow
+
+try {{
+    # Удаляем пользователя
+    Remove-LocalUser -Name $Username -ErrorAction Stop
+    Write-Host "SUCCESS: User $Username deleted" -ForegroundColor Green
+    
+    # Удаляем профили
+    $ProfilePaths = @(
+        "C:\\Users\\$Username",
+        "C:\\Users\\$Username.HP"
+    )
+    
+    foreach ($ProfilePath in $ProfilePaths) {{
+        if (Test-Path $ProfilePath) {{
+            Write-Host "Deleting profile: $ProfilePath" -ForegroundColor Gray
+            takeown /f "$ProfilePath" /r /d y 2>$null | Out-Null
+            icacls "$ProfilePath" /grant "Administrators:(OI)(CI)F" /t /q 2>$null | Out-Null
+            Remove-Item $ProfilePath -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "SUCCESS: Profile deleted: $ProfilePath" -ForegroundColor Green
+        }}
+    }}
+    
+    Write-Host "SUCCESS: User $Username completely deleted" -ForegroundColor Green
+    
+}} catch {{
+    Write-Host "ERROR: Failed to delete user $Username - $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}}
+            '''
+            
+            result = execute_powershell_step('delete_user', user_delete_script)
+            
+            if result['success']:
+                deleted_items.append(f"Пользователь Windows: {operator_username}")
+                write_log(f"Пользователь Windows {operator_username} успешно удален")
+            else:
+                errors.append(f"Ошибка удаления пользователя Windows {operator_username}: {result.get('output', 'Неизвестная ошибка')}")
+                
+        except Exception as e:
+            errors.append(f"Исключение при удалении пользователя Windows {operator_username}: {str(e)}")
+        
+        # 4. Удаляем оператора из базы данных
+        try:
+            delete_operator_db(operator_id)
+            deleted_items.append(f"Запись в БД: {operator_username}")
+            write_log(f"Оператор {operator_username} удален из базы данных")
+        except Exception as e:
+            errors.append(f"Ошибка удаления из БД: {str(e)}")
+        
+        # Формируем ответ
+        if len(deleted_items) > 0 and len(errors) == 0:
+            write_log(f"Оператор {operator_username} полностью удален")
+            return jsonify({
+                'success': True,
+                'message': f'Оператор {operator_username} полностью удален',
+                'deleted_items': deleted_items,
+                'emulators_deleted': len(emulators)
+            })
+        elif len(deleted_items) > 0:
+            write_log(f"Оператор {operator_username} частично удален с ошибками")
+            # Подсчитываем удаленные эмуляторы
+            deleted_emulators_count = len([e for e in emulators if f"Эмулятор: {e['name']}" in deleted_items])
+            
+            return jsonify({
+                'success': False,
+                'message': f'Оператор {operator_username} частично удален',
+                'deleted_items': deleted_items,
+                'errors': errors,
+                'emulators_deleted': deleted_emulators_count
+            }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Не удалось удалить оператора {operator_username}',
+                'errors': errors
+            }), 500
+            
+    except Exception as e:
+        error_msg = f"Критическая ошибка при удалении оператора {operator_username}: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
 @app.route('/api/delete_emulator/<emulator_id>', methods=['DELETE'])
 def api_delete_emulator(emulator_id):
     """Удаление эмулятора с очисткой реестра RemoteApp"""
@@ -942,7 +1271,8 @@ def api_delete_emulator(emulator_id):
     
     # Получаем эмулятор из базы данных
     emulators = get_operator_emulators_db(operator_id)
-    emulator = next((e for e in emulators if e['id'] == emulator_id), None)
+    # Приводим к строке для безопасного сравнения (фронтенд может передать строку)
+    emulator = next((e for e in emulators if str(e['id']) == str(emulator_id)), None)
     
     if not emulator:
         return jsonify({'error': 'Эмулятор не найден'}), 404
@@ -950,98 +1280,79 @@ def api_delete_emulator(emulator_id):
     write_log(f"Удаление эмулятора {emulator['name']} (ID: {emulator_id})")
     
     try:
-        # Импортируем скрипт удаления
-        from step_scripts import STEP_SCRIPTS
+        # Используем прямой вызов PowerShell для надежности
+        import subprocess
+        import os
         
-        # Создаем скрипт удаления эмулятора
-        delete_script = f'''
-# Удаление эмулятора {emulator['name']}
-Write-Host "🗑️ Удаление эмулятора {emulator['name']}..." -ForegroundColor Yellow
+        emulator_name = emulator['name']
+        script_path = "C:\\Scripts\\delete_emulator_en.ps1"
 
-# Получаем имя пользователя из имени эмулятора
-$EmulatorName = "{emulator['name']}"
-$Username = $EmulatorName -replace "_.*", ""
-
-Write-Host "Пользователь: $Username" -ForegroundColor Cyan
-
-try {{
-    # 1. Удаляем RemoteApp из реестра
-    $AppName = "$Username`AndroidEmulator"
-    $RemoteAppPath = "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Terminal Server\\TSAppAllowList\\Applications"
-    $AppKeyPath = "$RemoteAppPath\\$AppName"
-    
-    if (Test-Path $AppKeyPath) {{
-        Remove-Item -Path $AppKeyPath -Recurse -Force
-        Write-Host "✅ RemoteApp удален из реестра: $AppName" -ForegroundColor Green
-    }} else {{
-        Write-Host "⚠️ RemoteApp не найден в реестре: $AppName" -ForegroundColor Yellow
-    }}
-    
-    # 2. Удаляем файлы эмулятора
-    $FilesToDelete = @(
-        "C:\\Scripts\\$Username`_emulator.bat",
-        "C:\\Scripts\\$Username`AndroidEmulator.exe", 
-        "C:\\Scripts\\$Username`_emulator.rdp"
-    )
-    
-    foreach ($File in $FilesToDelete) {{
-        if (Test-Path $File) {{
-            Remove-Item -Path $File -Force
-            Write-Host "✅ Удален файл: $File" -ForegroundColor Green
-        }} else {{
-            Write-Host "⚠️ Файл не найден: $File" -ForegroundColor Yellow
-        }}
-    }}
-    
-    # 3. Удаляем AVD файлы
-    $UserProfilePath = "C:\\Users\\$Username"
-    $UserProfilePathHP = "C:\\Users\\$Username.HP"
-    
-    # Проверяем обе возможные директории
-    $AvdDirs = @()
-    if (Test-Path $UserProfilePathHP) {{
-        $AvdDirs += "$UserProfilePathHP\\.android\\avd"
-    }}
-    if (Test-Path $UserProfilePath) {{
-        $AvdDirs += "$UserProfilePath\\.android\\avd"
-    }}
-    
-    foreach ($AvdDir in $AvdDirs) {{
-        if (Test-Path $AvdDir) {{
-            $AvdFiles = Get-ChildItem -Path $AvdDir -Filter "$Username`_*" -ErrorAction SilentlyContinue
-            foreach ($AvdFile in $AvdFiles) {{
-                Remove-Item -Path $AvdFile.FullName -Recurse -Force
-                Write-Host "✅ Удален AVD файл: $($AvdFile.Name)" -ForegroundColor Green
-            }}
-        }}
-    }}
-    
-    Write-Host "✅ SUCCESS: Эмулятор $EmulatorName полностью удален" -ForegroundColor Green
-    
-}} catch {{
-    Write-Host "❌ ERROR: Ошибка удаления эмулятора: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
-}}
-        '''
-        
-        # Выполняем скрипт удаления
-        result = execute_powershell_step('delete_emulator', delete_script)
-        
-        if result['success']:
-            # Удаляем эмулятор из базы данных
-            delete_emulator_db(emulator_id)
-            
-            write_log(f"Эмулятор {emulator['name']} успешно удален")
-            return jsonify({
-                'success': True,
-                'message': f'Эмулятор {emulator["name"]} успешно удален',
-                'cleanup_output': result['output']
-            })
-        else:
+        # Получаем имя пользователя оператора для передачи в скрипт как -UserName
+        operator = get_operator_by_id_db(operator_id)
+        operator_username = operator['username'] if operator else None
+        if not operator_username:
             return jsonify({
                 'success': False,
-                'error': 'Ошибка при удалении файлов эмулятора',
-                'output': result['output']
+                'error': 'Не удалось определить имя оператора для удаления эмулятора'
+            }), 500
+        
+        write_log(f"Прямой вызов скрипта удаления: {script_path} -EmulatorName {emulator_name}")
+        
+        # Проверяем существование скрипта
+        if not os.path.exists(script_path):
+            return jsonify({
+                'success': False,
+                'error': f'Скрипт удаления не найден: {script_path}'
+            }), 500
+        
+        # Выполняем скрипт напрямую с явной передачей имени пользователя оператора
+        cmd = [
+            'powershell.exe', '-ExecutionPolicy', 'Bypass',
+            '-File', script_path,
+            '-EmulatorName', emulator_name,
+            '-UserName', operator_username
+        ]
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 минут таймаут
+                encoding='utf-8',
+                errors='replace'
+            )
+            
+            output = result.stdout + result.stderr
+            write_log(f"Вывод скрипта удаления: {output}")
+            
+            if result.returncode == 0:
+                # Удаляем эмулятор из базы данных
+                delete_emulator_db(emulator_id)
+                
+                write_log(f"Эмулятор {emulator_name} успешно удален")
+                return jsonify({
+                    'success': True,
+                    'message': f'Эмулятор {emulator_name} успешно удален',
+                    'output': output
+                })
+            else:
+                write_log(f"Ошибка выполнения скрипта удаления. Код возврата: {result.returncode}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Ошибка удаления эмулятора. Код возврата: {result.returncode}',
+                    'output': output
+                }), 500
+                
+        except subprocess.TimeoutExpired:
+            return jsonify({
+                'success': False,
+                'error': 'Таймаут выполнения скрипта удаления (более 5 минут)'
+            }), 500
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'Ошибка запуска скрипта: {str(e)}'
             }), 500
     
     except Exception as e:
@@ -1084,7 +1395,7 @@ def parse_step_output(output, step_name):
         if password_match:
             result['password'] = password_match.group(1).strip()
 
-    elif step_name == 'create_avd':
+    elif step_name == 'copy_template_avd':
         avd_match = re.search(r'AVD_NAME: (.+)', output)
         if avd_match:
             result['avd_name'] = avd_match.group(1).strip()
@@ -1137,7 +1448,175 @@ def parse_full_setup_output(output):
     
     return result
 
-# Статический контент для простого HTML интерфейса
+@app.route('/api/mass_delete_emulators', methods=['POST'])
+def api_mass_delete_emulators():
+    """Массовое удаление эмуляторов не в базе данных"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'admin':
+        return jsonify({'error': 'Доступ только для администраторов'}), 403
+    
+    write_log("Запуск массового удаления эмуляторов")
+    
+    try:
+        # Используем наш протестированный скрипт
+        mass_delete_script = '''
+# Массовое удаление эмуляторов не в БД
+& "C:\\Scripts\\mass_delete_emulators_en.ps1"
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "SUCCESS: Mass deletion completed" -ForegroundColor Green
+} else {
+    Write-Host "ERROR: Mass deletion failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    exit 1
+}
+        '''
+        
+        result = execute_powershell_step('mass_delete_emulators', mass_delete_script)
+        
+        if result['success']:
+            write_log("Массовое удаление эмуляторов завершено успешно")
+            return jsonify({
+                'success': True,
+                'message': 'Массовое удаление эмуляторов завершено',
+                'output': result['output']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Ошибка массового удаления эмуляторов',
+                'output': result['output']
+            }), 500
+            
+    except Exception as e:
+        error_msg = f"Критическая ошибка массового удаления: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
+@app.route('/api/mass_delete_users', methods=['POST'])
+def api_mass_delete_users():
+    """Массовое удаление пользователей Android Emulator не в базе данных"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'admin':
+        return jsonify({'error': 'Доступ только для администраторов'}), 403
+    
+    write_log("Запуск массового удаления пользователей Android Emulator")
+    
+    try:
+        # Используем наш протестированный скрипт
+        mass_delete_script = '''
+# Массовое удаление пользователей Android Emulator не в БД
+$dbOperators = @()
+try {
+    $dbOutput = sqlite3 "C:\\Scripts\\emulator_manager.db" "SELECT username FROM operators;"
+    $dbOperators = $dbOutput | Where-Object { $_ -ne "" }
+} catch {
+    Write-Host "ERROR: Cannot connect to database" -ForegroundColor Red
+    exit 1
+}
+
+$systemUsers = Get-LocalUser | Where-Object { $_.Name -match "^User\\d+$" } | Select-Object -ExpandProperty Name
+$usersToDelete = $systemUsers | Where-Object { $_ -notin $dbOperators }
+
+Write-Host "Users to delete: $($usersToDelete.Count)" -ForegroundColor Yellow
+
+$successCount = 0
+foreach ($username in $usersToDelete) {
+    try {
+        Remove-LocalUser -Name $username -ErrorAction Stop
+        Write-Host "SUCCESS: Deleted user $username" -ForegroundColor Green
+        $successCount++
+    } catch {
+        Write-Host "ERROR: Failed to delete user $username" -ForegroundColor Red
+    }
+}
+
+Write-Host "Successfully deleted: $successCount users" -ForegroundColor Green
+        '''
+        
+        result = execute_powershell_step('mass_delete_users', mass_delete_script)
+        
+        if result['success']:
+            write_log("Массовое удаление пользователей завершено успешно")
+            return jsonify({
+                'success': True,
+                'message': 'Массовое удаление пользователей завершено',
+                'output': result['output']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Ошибка массового удаления пользователей',
+                'output': result['output']
+            }), 500
+            
+    except Exception as e:
+        error_msg = f"Критическая ошибка массового удаления пользователей: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
+@app.route('/api/cleanup_database', methods=['POST'])
+def api_cleanup_database():
+    """Очистка базы данных от эмуляторов без файлов"""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not is_authenticated(token):
+        return jsonify({'error': 'Не авторизован'}), 401
+    
+    session_data = sessions.get(token, {})
+    if session_data.get('user_type') != 'admin':
+        return jsonify({'error': 'Доступ только для администраторов'}), 403
+    
+    write_log("Запуск очистки базы данных")
+    
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DATABASE_PATH)
+            cursor = conn.cursor()
+            
+            # Получаем все эмуляторы из БД
+            cursor.execute('SELECT id, name FROM emulators')
+            emulators = cursor.fetchall()
+            
+            deleted_count = 0
+            for emulator_id, emulator_name in emulators:
+                # Проверяем существование batch файла
+                batch_file = f"C:\\Scripts\\{emulator_name}.bat"
+                if not os.path.exists(batch_file):
+                    # Удаляем из БД
+                    cursor.execute('DELETE FROM emulators WHERE id = ?', (emulator_id,))
+                    deleted_count += 1
+                    write_log(f"Удален из БД эмулятор без файлов: {emulator_name}")
+            
+            conn.commit()
+            conn.close()
+        
+        write_log(f"Очистка БД завершена. Удалено записей: {deleted_count}")
+        return jsonify({
+            'success': True,
+            'message': f'Очистка базы данных завершена. Удалено записей: {deleted_count}',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        error_msg = f"Ошибка очистки базы данных: {str(e)}"
+        write_log(error_msg, 'ERROR')
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
 @app.route('/')
 def serve_main_interface():
     """Обслуживание главной страницы"""
@@ -1148,59 +1627,7 @@ def serve_main_interface():
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     """Обслуживание статических файлов"""
-    try:
-        # Получаем абсолютный путь к файлу
-        file_path = os.path.join(os.path.dirname(__file__), filename)
-        return send_file(file_path)
-    except:
-        # Если файл не найден, возвращаем главную страницу
-        html_file = os.path.join(os.path.dirname(__file__), 'simple_interface.html')
-        return send_file(html_file)
+    return send_from_directory('.', filename)
 
 if __name__ == '__main__':
-    write_log("Запуск Flask API для Android Emulator Manager")
-    print("")
-    print("Android Emulator RemoteApp API запущен!")
-    print("")
-    print("Доступные эндпоинты:")
-    print("  === Администратор ===")
-    print("  POST /api/login - Вход администратора")
-    print("  POST /api/logout - Выход из системы")
-    print("  GET  /api/operators - Список всех операторов")
-    print("  POST /api/create_operator - Создание нового оператора")
-    print("  === Операторы ===")
-    print("  POST /api/operator_login - Вход оператора")
-    print("  GET  /api/operator_emulators - Эмуляторы оператора")
-    print("  POST /api/create_emulator - Создание эмулятора")
-    print("  GET  /api/download_rdp/<id> - Скачивание RDP файла")
-    print("  === Тестирование ===")
-    print("  POST /api/test_step - Пошаговое тестирование")
-    print("  GET  /api/steps_info - Информация о шагах")
-    print("")
-    print("Веб-интерфейс: http://localhost:5000")
-    print("API Base URL: http://localhost:5000/api")
-    print("")
-    print("Не забудьте:")
-    print("  1. Изменить пароль администратора в коде")
-    print("  2. Установить Android SDK")
-    print("  3. Установить Bat To Exe Converter")
-    print("  4. Запустить от имени администратора")
-    print("")
-    
     app.run(host='0.0.0.0', port=5000, debug=True)
-
-# Очистка старых сессий (запускается периодически)
-def cleanup_old_sessions():
-    """Очистка старых сессий (старше 24 часов)"""
-    current_time = datetime.now()
-    expired_tokens = []
-    
-    for token, session_data in sessions.items():
-        if current_time - session_data['created_at'] > timedelta(hours=24):
-            expired_tokens.append(token)
-    
-    for token in expired_tokens:
-        del sessions[token]
-        write_log(f"Удалена устаревшая сессия: {token[:8]}...")
-    
-    return len(expired_tokens)
